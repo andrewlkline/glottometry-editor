@@ -1,0 +1,276 @@
+# Historical Glottometry GUI — scope & feasibility
+
+A GUI tool for building **glottometric diagrams**: the wave-model alternative
+to family trees developed by Siva Kalyan and Alexandre François.
+
+**Status: Phase 0 complete.** The computational core is built, tested and
+verified in a browser; the diagram renderer that is the actual point of the
+project is Phase 1 and does not exist yet. See [BUILD_PLAN.md](BUILD_PLAN.md).
+
+## What the method is
+
+Given a matrix of **innovations × languages** (1 = language underwent the
+innovation, 0 = it did not, blank = unknown), Historical Glottometry scores every
+*attested* subgroup — one with at least one exclusively shared innovation — on
+two measures (Kalyan & François 2018: §3.2–3.3):
+
+| symbol | name | definition |
+|---|---|---|
+| `ε` (epsilon) | exclusively shared innovations | innovations affecting exactly this set |
+| `κ` (kappa) | **cohesiveness** | `p / (p + q)` |
+| `ς` (sigma) | **subgroupiness** | `ε × κ` |
+
+where `p` = innovations shared by *all* members (outsiders may share too) and
+`q` = innovations that **conflict** — affecting some-but-not-all members *and* at
+least one outsider. Innovations nested strictly inside the subgroup are
+irrelevant and excluded from both (K&F 2018: 70 fn. 9).
+
+The output is an Euler-style diagram: nodes are languages, contours enclose
+subgroups, **thickness ∝ ς**, **redness ∝ κ**. Contours are allowed to
+intersect — that is the whole point, and what a tree cannot express.
+
+The 2018 Kalyan & François chapter is the canonical method statement;
+Figure 5-11 (p. 82) is the target output. See **References** below for where to
+get the papers — they are not in the repo (see `literature/`, gitignored).
+
+## Prior art — read this before building anything
+
+**An official implementation already exists**: the
+[Historical Glottometry online analyzer](https://marama.huma-num.fr/hg/upload)
+by Kalyan & François (launched 2021). It is *not* packaged or open source —
+there is no CRAN or PyPI package, and the engine is only reachable through
+their web form.
+
+- **Input**: two CSVs — innovations matrix, plus optional lat/long coordinates.
+- **Output**: an `.xlsx` of all scored subgroups, an auto-generated prose
+  interpretation, and an SVG diagram.
+- **Backend**: R (the SVG is emitted by `svglite`, plotted with ggplot2) behind
+  a PHP frontend.
+
+You can drive it headlessly, which is how the reference output in
+`prototype/data/` was produced:
+
+```bash
+curl -L -X POST "https://marama.huma-num.fr/hg/upload/do_upload/" -F "langfam=Demo" -F "innofile=@innov.csv;type=text/csv" -F "coordfile=@coords.csv;type=text/csv" -F "threshold=1" -o result.html
+```
+
+### Where it falls short — this is the opportunity
+
+1. **It draws convex hulls over geographic coordinates.** Hulls are the wrong
+   primitive: they enclose non-members. In the demo output
+   (`prototype/data/marama_reference_output.svg`) the ⓁA–ⓁB–ⓁQ–ⓁR contour
+   swallows every language in between. The published Figure 5-11 is nothing
+   like this — it was hand-drawn.
+2. **Its own results page tells you to finish the job elsewhere**: *"download
+   this file and fine-tune the placement of isoglosses using a vector graphics
+   program such as Inkscape or Adobe Illustrator."*
+3. **Batch, not interactive.** Changing the ς threshold means re-uploading.
+   There is no way to nudge a node, hide a contour, or inspect which
+   innovations support a subgroup.
+4. **No data-entry support.** The 474-row matrix behind the published study was
+   built by hand, and the etymological reasoning behind each row lives outside
+   the CSV entirely.
+5. **No metric alternatives**, though the literature disputes the defaults
+   (see *Contested choices* below).
+
+## Feasibility findings
+
+### The computation is a non-issue — verified
+
+The paper's mention of "131,070 (=2¹⁷−2) potential groupings" makes this look
+like a combinatorics problem. It is not. A subgroup must have `ε ≥ 1` to be
+attested, so **candidates are bounded by the number of distinct rows in the
+matrix**, never by `2ⁿ`. On the 18-language × 474-innovation demo set that is
+250 distinct patterns, of which 155 clear the `ε ≥ 1` bar — all scored in
+~10 ms (~16 ms in the browser).
+
+Measured scaling of the vectorised scorer (`prototype/glottometry.py`):
+
+| languages | innovations | candidates | time |
+|---|---|---|---|
+| 20 | 500 | 162 | <0.01 s |
+| 40 | 1 500 | 757 | 0.04 s |
+| 60 | 3 000 | 1 813 | 0.36 s |
+| 100 | 5 000 | 3 765 | 2.1 s |
+
+Fast enough to recompute live on every keystroke in a GUI.
+
+### The visualization is the real work
+
+Three sub-problems, in increasing difficulty:
+
+1. **Node layout / seriation.** The published diagram is essentially a 1-D
+   chain in which every subgroup is a contiguous run, so each contour is a
+   simple capsule. Finding such an ordering is a seriation problem — NP-hard in
+   general but trivial at n ≤ 30. **Verified**: a plain multi-start simulated
+   annealing over the demo data makes **30 of the 31 displayed subgroups
+   contiguous**, recovering almost exactly the natural geographic chain. So
+   ~97% of contours reduce to rounded rectangles.
+2. **Non-convex contours.** The residual cases need a curve that encloses
+   members while routing *around* excluded nodes. Established prior art:
+   BubbleSets (Collins et al. 2009), LineSets, KelpFusion. This is the one
+   genuinely novel piece of engineering.
+3. **2-D layouts.** A pure chain is not always enough — Figure 5-11 itself
+   branches around Mota–Nume–Dorig–Mwerlap. A general tool needs a 2-D fallback
+   (force-directed on κ-derived distances, or MDS) plus manual node dragging.
+
+### Known discrepancy in NA handling
+
+The published method leaves blank cells undefined. Both the official engine and
+this prototype produce **fractional** ε, so both weight unknowns somehow, but
+the schemes differ:
+
+| subgroup | official ε / κ | prototype ε / κ |
+|---|---|---|
+| ⓁA+ⓁB | 16.18 / 0.82 | 15.25 / 0.78 |
+| ⓁE+ⓁF | 12.16 / 0.91 | 12.25 / 0.87 |
+
+The prototype treats each NA as an independent coin flip (P = 0.5) and takes
+the expected count. **The rankings agree** — the prototype reproduces the
+official top-11 subgroups in the same order — but exact figures do not. The
+official scheme is undocumented and resisted reverse-engineering: neither fixed
+substitution (every combination of NA-inside/NA-outside over {0, .25, .5, .75,
+1}) nor row-, column- or global-mean imputation reproduces their figures. For
+3+ member subgroups their ε is *higher* than any scheme tested (ⓁN+ⓁO+ⓁP:
+official 11.42 vs 10.50 best); for pairs it is lower (ⓁA+ⓁB: official 16.18 vs
+17.00 best). Subgroups whose rows contain no NA match exactly under every
+scheme, confirming the divergence is purely NA-driven. The decision (see
+BUILD_PLAN.md §1) is to document our own policy and match rankings rather than
+absolute values.
+
+The official engine also reports **673** subgroups against our **155**. Ours
+is a clean subset of theirs (verified in `tests/maramaBaseline.test.ts`), so
+they generate candidates beyond distinct row patterns — possibly intersections
+of isoglosses — and retain some with ε as low as 0.01. Also unresolved.
+
+### Contested choices a good tool should expose
+
+These are live disagreements in the literature, not settled defaults:
+
+- **Display cutoff on ς vs. ε.** Daniels, Barth & Barth (2019) argue a ς
+  threshold hides real structure — in their Sogeram data it made the pivotal
+  Apalɨ language look like it subgroups with nothing — and propose `ε ≥ 2`
+  instead. They also note the opposite risk: ε alone over-represents groups
+  built on parallel innovations.
+- **Alternative strength measures.** Hammarström (2017) proposes Fisher's exact
+  test as a statistically rigorous replacement for κ and ς.
+- **Filtering by innovation type.** Datasets are typed (regular sound change,
+  irregular sound change, morphological, syntactic, lexical). K&F's own data is
+  50% lexical replacement, the most borrowing-prone category. Being able to
+  recompute with a type excluded directly addresses Jacques & List's (2019)
+  critique.
+- **Weighting by innovation type** — deliberately *not* done by K&F, and Pelkey
+  (2015: 402) warns weighting "too easily becomes an outlet for comparativists
+  to justify their own intuitions." If offered, it should be off by default.
+- **Relative chronology.** K&F recorded crucial orderings between innovations
+  but never used them; only 19.4% of their innovations (92/474) participate in
+  any ordering. Storing them is cheap and no existing tool does it.
+
+## Running it
+
+### Node version — read this first
+
+The `node` on `PATH` is **v14**, far too old for the toolchain. Node 25 is
+installed via Homebrew but shadowed by it. Every command below assumes:
+
+```bash
+export PATH="/usr/local/opt/node/bin:$PATH"
+```
+
+To make that permanent, add it to `~/.zshrc`, or run `brew link --overwrite
+node`. Deliberately not done for you — it's your global environment.
+
+### Commands
+
+```bash
+npm install
+npm test          # 54 tests: Python parity, invariants, CSV, Marama baseline
+npm run typecheck
+npm run dev       # placeholder UI at localhost:5173
+npm run build
+npm run fixtures  # regenerate test fixtures from the Python reference
+```
+
+`.claude/launch.json` points at the Homebrew Node directly, because the `npm`
+shebang resolves to the old v14.
+
+### Layout
+
+```
+src/core/        metrics, candidate enumeration, seriation — pure, no DOM
+src/data/        Marama CSV import/export
+src/ui/App.tsx   Phase 0 placeholder; Phase 1 replaces it
+prototype/       Python reference implementation + demo data
+tools/           fixture generation
+tests/           parity, invariants, CSV, Marama baseline
+```
+
+### The two-implementation setup
+
+`prototype/glottometry.py` is the reference; `src/core/` must match it to 1e-9.
+`tools/gen_fixtures.py` dumps fixtures from Python, and `tests/parity.test.ts`
+asserts against them across all five NA policies. **The fixtures are committed
+on purpose.** If they regenerated on every run, a bug introduced in the Python
+reference would flow straight into them and parity would still pass; pinning
+them means any change to the reference shows up as a diff you have to look at.
+Run `npm run fixtures` deliberately, and read the diff. On top of that,
+`tests/maramaBaseline.test.ts` checks our ranking against the *official* engine
+output in `prototype/data/marama_baseline.json`.
+
+That external oracle earned its keep immediately: it caught two spec bugs the
+Python-parity tests could not, because both implementations were wrong in the
+same way (see BUILD_PLAN.md, "Two corrections Phase 0 surfaced").
+
+`prototype/data/` also holds K&F's own 18-language demo dataset and the SVG the
+official engine returns for it — a regression baseline and a visual
+counterexample. Note the demo CSVs ship with **CR-only line endings**; the
+parser handles them, but command-line tools may need `tr '\r' '\n'`.
+
+## Build plan
+
+See [BUILD_PLAN.md](BUILD_PLAN.md) for the agreed scope, stack decisions,
+contour-engine design, phasing and risks.
+
+## Status / open questions
+
+- [x] Computational core built in TypeScript, at parity with Python.
+- [x] Seriation fast enough for live editing (279 ms, was 12 s in Python).
+- [x] `epsilon >= 1` and whole-family exclusion corrected to match the paper.
+- [ ] **Phase 1 — the diagram renderer — not started.** This is the project.
+- [ ] NA-handling scheme still does not match the official engine. Settled
+      policy: document ours, match rankings. Resolving it properly means asking
+      the authors.
+- [ ] Candidate-generation difference unexplained: they list 673 subgroups, we
+      list 155. Ours is now a clean subset of theirs, so they generate groups
+      that are not any innovation's exact pattern — by some means unknown.
+- [ ] Layout instability under thresholding — the seriated order reshuffles as
+      the threshold slider moves, because many orderings tie at cost 0. Needs a
+      tie-breaker before Phase 1's renderer is built.
+- [ ] No contact with Kalyan/François. They invite it ("feel free to contact
+      us"), and they would be the natural first users and reviewers.
+- [x] Under git. No remote yet.
+
+## References
+
+The three source papers are **not committed** — they are third-party
+copyrighted PDFs, and this repo is intended to be publishable. Put local copies
+in `literature/` (gitignored) if you want them to hand.
+
+- Kalyan, Siva & Alexandre François. 2018. Freeing the Comparative Method from
+  the tree model: A framework for Historical Glottometry. In *Let's Talk about
+  Trees* (Senri Ethnological Studies 98), 59–89. **The canonical statement of
+  the method.** Linked from the [HG homepage](https://marama.huma-num.fr/Glotto/).
+- François, Alexandre. 2014. Trees, waves and linkages. In *The Routledge
+  Handbook of Historical Linguistics*, 161–189. Also via the HG homepage.
+- Pelkey, Jamin & Siva Kalyan. 2026. Wave Model. In *The Wiley Blackwell
+  Companion to Diachronic Linguistics*.
+  [doi:10.1002/9781119898023.wbcdl060](https://onlinelibrary.wiley.com/doi/10.1002/9781119898023.wbcdl060)
+- Daniels, Don, Danielle Barth & Wolfgang Barth. 2019. Subgrouping the Sogeram
+  languages: A critical appraisal of Historical Glottometry. *JHL* 9(1): 92–127.
+- Jacques, Guillaume & Johann-Mattis List. 2019. Save the trees. *JHL* 9(1).
+  The whole JHL 9(1) special issue is [available as a PDF from
+  Marama](https://marama.huma-num.fr/data/Kalyan-Francois-Hammarstrom_2019_Tree-model-Historical-linguistics_JHL_9-1_Special-issue_print.pdf)
+  and contains both this and the Daniels et al. critique.
+- Collins, Christopher et al. 2009. Bubble Sets. *IEEE TVCG* 15(6).
+- [HG project homepage](https://marama.huma-num.fr/Glotto/) ·
+  [online analyzer](https://marama.huma-num.fr/hg/upload)

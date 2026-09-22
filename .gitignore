@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.DS_Store
+*.local
+__pycache__/
+*.pyc
+tsconfig.tsbuildinfo
+
+# Source papers — third-party copyrighted PDFs. Kept locally, not distributed.
+# See the References section of README.md for where to obtain them.
+literature/
