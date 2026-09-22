@@ -3,10 +3,11 @@
 A GUI tool for building **glottometric diagrams**: the wave-model alternative
 to family trees developed by Siva Kalyan and Alexandre François.
 
-**Status: Phase 1 complete.** It computes, renders and exports a glottometric
-diagram in the style of K&F's published figure, with live thresholding and
-hover-to-isolate. Still to come: the innovation-matrix editor, 2-D layouts and
-the contested-settings panel. See [BUILD_PLAN.md](BUILD_PLAN.md).
+**Status: Phase 1 complete, including 2-D layouts.** It computes, renders and
+exports glottometric diagrams in three layouts — chain, MDS on cohesiveness,
+and geographic — with live thresholding and hover-to-isolate. Still to come:
+the innovation-matrix editor and the contested-settings panel. See
+[BUILD_PLAN.md](BUILD_PLAN.md).
 
 ## What the method is
 
@@ -198,15 +199,34 @@ shebang resolves to the old v14.
 ### Layout
 
 ```
-src/core/        metrics, candidates, seriation, chain layout — pure, no DOM
-src/geometry/    tracks (interval colouring), capsule (contour paths)
+src/core/        metrics, candidates, seriation, layouts, MDS — pure, no DOM
+src/geometry/    tracks, capsule (chain contours), blob + marchingSquares (2-D)
 src/render/      scene, Diagram.tsx, styles, exportSvg
-src/data/        Marama CSV import/export
+src/data/        Marama CSV import/export (innovations + coordinates)
 src/ui/App.tsx   the app
 prototype/       Python reference implementation + demo data
 tools/           fixture generation
-tests/           parity, invariants, CSV, Marama baseline, geometry, scene
+tests/           parity, invariants, CSV, Marama baseline, geometry, scene, planar
 ```
+
+### Layouts
+
+| layout | positions from | contours |
+|---|---|---|
+| chain | seriation (1-D ordering) | rounded rectangles |
+| MDS | classical scaling on `1 − κ` | routed blobs |
+| geographic | lat/long, equirectangular | routed blobs |
+
+The chain is the one that matches K&F's published figure, and seriation makes
+each subgroup a contiguous run so its contour can be a simple shape. The 2-D
+layouts say things a chain cannot — on the demo data MDS shows ⓁA+ⓁB genuinely
+detached from the rest, which the chain flattens into "the top of the column" —
+at the cost of needing the general contour engine.
+
+Both 2-D layouts apply **overlap relaxation**. MDS places a tightly-knit
+cluster almost on a single point, which is exactly the interesting case in a
+linkage, so nodes closer than a minimum are pushed apart while a weak spring
+holds each near where the data put it.
 
 ### How the diagram is built
 
@@ -232,10 +252,20 @@ no nodes at any threshold and costs two contours' worth of contiguity at ς ≥ 
 ### Contour containment
 
 Every member is inside its contour and every non-member outside — the property
-the Marama engine's convex hulls violate. Horizontal padding grows freely with
-the nesting track; vertical padding is capped at `spacing - nodeRadius`, or a
-wide outer contour would swallow the neighbouring node. `tests/scene.test.ts`
-asserts this for every displayed subgroup.
+the Marama engine's convex hulls violate. It is asserted for every displayed
+subgroup in every layout (`tests/scene.test.ts`, `tests/planar.test.ts`).
+
+Getting there took a different fix in each renderer, and both were found by the
+tests rather than by looking at the picture:
+
+- **Chain.** Horizontal padding grows freely with the nesting track; vertical
+  padding is capped at `spacing - nodeRadius`, or a wide outer contour swallows
+  the neighbouring node.
+- **2-D.** Soft repulsion alone *cannot* guarantee containment: the member term
+  is a sum, so enough nearby members outvote any fixed repulsion, and fattening
+  a blob for an outer track makes it worse. A hard exclusion disk around each
+  non-member forces the field below the threshold there, which turns
+  containment from a tuning question into a property of the construction.
 
 ### The two-implementation setup
 
@@ -270,11 +300,15 @@ contour-engine design, phasing and risks.
 - [x] `epsilon >= 1` and whole-family exclusion corrected to match the paper.
 - [x] **Phase 1 — diagram renderer, live thresholding, SVG export.**
 - [x] Layout stability resolved: seriate once, threshold filters drawing only.
-- [ ] Node colours by MDS on cohesiveness (K&F 2018: 84 fn. 13) — deferred.
-- [ ] BubbleSets for split subgroups; 3 of 31 currently draw as separate runs
-      joined by a connector. Honest, but a routed contour would be better.
-- [ ] 2-D layouts. Figure 5-11 branches around Mota–Nume–Dorig–Mwerlap and a
-      chain cannot express that.
+- [ ] Node colours by 3-D MDS on cohesiveness (K&F 2018: 84 fn. 13). The MDS
+      machinery now exists, so this is a small job.
+- [x] 2-D layouts: MDS on cohesiveness, and geographic.
+- [x] Routed contours (marching squares over an attract/repel field), so a
+      contour can wrap any arrangement of members and exclude what sits among
+      them.
+- [ ] Back-port routed contours to the chain layout. 3 of 31 subgroups there
+      still draw as separate runs joined by a connector — honest, never
+      encloses a non-member, but a single routed shape would be better.
 - [ ] Phase 2: matrix editor, contested-settings panel, project save/load.
 - [ ] NA-handling scheme still does not match the official engine. Settled
       policy: document ours, match rankings. Resolving it properly means asking

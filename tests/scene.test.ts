@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Glottometry } from '../src/core/metrics.js';
-import { orderFor } from '../src/core/layout.js';
+import { chainLayout, orderFor } from '../src/core/layout.js';
 import { parseMaramaCsv } from '../src/data/maramaCsv.js';
 import { buildScene } from '../src/render/scene.js';
 import { exportSvg } from '../src/render/exportSvg.js';
@@ -22,8 +22,9 @@ const dataset = parseMaramaCsv(
 
 const all = new Glottometry(dataset, 'half').subgroups();
 const { order } = orderFor(all, dataset.languages.length);
+const layout = chainLayout(order, dataset.languages);
 const shown = all.filter((s) => s.sigma >= 1);
-const scene = buildScene(order, dataset.languages, shown);
+const scene = buildScene(layout, shown);
 
 /** Bounding boxes of the rounded rectangles in a path, y-axis only. */
 function yRanges(paths: string[]): [number, number][] {
@@ -101,7 +102,7 @@ describe('scene on the demo dataset', () => {
     // The Phase 1 gate: the ordering comes from the full subgroup set, so
     // changing what is displayed must never move a node.
     for (const t of [0.5, 1, 2, 3, 5]) {
-      const s = buildScene(order, dataset.languages, all.filter((x) => x.sigma >= t));
+      const s = buildScene(layout, all.filter((x) => x.sigma >= t));
       expect(s.layout.order).toEqual(scene.layout.order);
       expect(s.layout.nodes.map((n) => n.y)).toEqual(scene.layout.nodes.map((n) => n.y));
     }
@@ -144,8 +145,7 @@ describe('SVG export', () => {
 
   it('escapes markup in labels', () => {
     const nasty = buildScene(
-      [0, 1],
-      ['<script>', 'A&B'],
+      chainLayout([0, 1], ['<script>', 'A&B']),
       [{ members: [0, 1], memberNames: ['<script>', 'A&B'], epsilon: 1, kappa: 1, sigma: 1, p: 1, q: 0 }],
     );
     const out = exportSvg(nasty);

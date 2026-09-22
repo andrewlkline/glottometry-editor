@@ -261,13 +261,60 @@ fixed low number would have been overfitting to it; early stopping adapts.
 #### Deferred out of Phase 1
 
 - **MDS node colours.** K&F colour nodes by 3-D MDS on pairwise cohesiveness
-  mapped to RGB (2018: 84 fn. 13). Needs an eigendecomposition, is independent
-  of the contour work, and is better done properly than approximated.
-- **BubbleSets.** Split subgroups (3 of 31 here) currently draw one shape per
-  contiguous run plus a dashed connector. That is honest — it never encloses a
-  non-member — but a routed contour would be better.
-- **2-D layouts.** Figure 5-11 itself branches around Mota–Nume–Dorig–Mwerlap;
-  the chain cannot express that. Geographic and MDS layouts are Phase 2.
+  mapped to RGB (2018: 84 fn. 13). The MDS machinery now exists (see below), so
+  this is a small job whenever it is wanted.
+- **BubbleSets for the chain layout.** Split subgroups (3 of 31) still draw one
+  shape per contiguous run plus a dashed connector there. Honest, never
+  encloses a non-member, and the 2-D renderer now has a routed contour that
+  could be back-ported if it turns out to matter.
+
+### Phase 1b — 2-D layouts and routed contours — **DONE**
+
+Taken next because it was what most limited fidelity to the published figure:
+Figure 5-11 branches around Mota–Nume–Dorig–Mwerlap and a chain cannot say
+that. 2-D layout and the general contour engine turned out to be one job, not
+two — a chain layout is precisely what *lets* contours be rounded rectangles.
+
+**Layouts.** Three, switchable: chain, MDS on cohesiveness, geographic.
+
+- MDS runs classical scaling on `1 − κ` via power iteration with deflation, no
+  linear-algebra dependency; exact on a synthetic grid, 25 ms on the demo data.
+  It immediately earns its place: ⓁA+ⓁB come out clearly detached from the
+  rest, which the chain flattens into "the top of the column".
+- Geographic projects lat/long equirectangularly with longitude scaled by
+  cos(mean latitude). This is the head-to-head with the Marama engine — same
+  data, same coordinates, correct contours.
+- Both need **overlap relaxation**. MDS puts a tightly-knit cluster almost on
+  one point, which is exactly the interesting case in a linkage; without
+  relaxation six labels were unreadable and splits rose from 3 to 7. Pairs
+  closer than a minimum are pushed apart while a weak spring holds each node
+  near where the data put it.
+
+**Contours** (`geometry/blob.ts`, `geometry/marchingSquares.ts`): a scalar
+field where members attract and non-members repel, traced with marching
+squares, Chaikin-smoothed. Genuine holes fall out for free — members encircling
+a non-member give an outer ring and an inner one, and containment is tested
+even-odd across all rings, matching `fill-rule: evenodd`.
+
+#### Soft repulsion cannot guarantee containment
+
+The first version failed the containment property on real data: ⓁQ fell inside
+ⓁL+ⓁM+ⓁN+ⓁO+ⓁP, ⓁK inside ⓁC…ⓁJ. The member term is a *sum*, so enough nearby
+members outvote any fixed repulsion, and fattening the blob for an outer track
+makes it worse. No amount of parameter tuning fixes that — it is structural.
+
+The fix is a hard exclusion disk: inside a small radius of any non-member the
+field is forced below the threshold. Containment stops being a tuning question
+and becomes a property of the construction. Soft repulsion stays, because it
+still shapes the contour nicely.
+
+#### Export size
+
+Marching squares emits a vertex per grid crossing and each Chaikin pass doubles
+it, so the first 2-D export was **392 KB** against 17 KB for the chain — mostly
+near-collinear noise, bad for file size and worse for anyone opening it in a
+vector editor. Douglas-Peucker simplification at 0.6 world units brings it to
+**37 KB** with no visible change and containment tests still green.
 
 ### Phase 2 — make it an editor *(3–4 days)*
 

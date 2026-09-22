@@ -93,3 +93,30 @@ export function toMaramaCsv(dataset: Dataset): string {
   });
   return lines.join('\n') + '\n';
 }
+
+export interface LanguageCoordinates {
+  /** Keyed by the language label used in the innovations CSV. */
+  [label: string]: { lat: number; lon: number };
+}
+
+/**
+ * Parse the Marama coordinates CSV: `label, latitude, longitude`.
+ *
+ * Their guidance says row headings must match the innovations file's column
+ * headings and that the columns are latitude then longitude, whatever they are
+ * titled — so position is authoritative here, not the header text.
+ */
+export function parseCoordinatesCsv(text: string): LanguageCoordinates {
+  const lines = splitLines(text);
+  const out: LanguageCoordinates = {};
+
+  for (let i = 1; i < lines.length; i++) {  // row 0 is the header
+    const fields = splitFields(lines[i]!);
+    const label = (fields[0] ?? '').trim();
+    const lat = Number(fields[1]);
+    const lon = Number(fields[2]);
+    if (!label || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    out[label] = { lat, lon };
+  }
+  return out;
+}

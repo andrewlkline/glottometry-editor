@@ -58,3 +58,41 @@ export function assignTracks(items: TrackInput[]): number[] {
 
   return tracks;
 }
+
+/**
+ * Track assignment for 2-D layouts, where there are no intervals to colour.
+ *
+ * Two subgroups need visually distinct contours when their member sets
+ * intersect — nested or merely overlapping. That is graph colouring on the
+ * intersection graph, which is not an interval graph, so greedy is no longer
+ * optimal; it is still fast and good enough, and smaller sets go inside.
+ */
+export function assignTracksByOverlap(memberSets: number[][]): number[] {
+  const sets = memberSets.map((members, index) => ({
+    index,
+    members: new Set(members),
+    size: members.length,
+  }));
+  sets.sort((a, b) => a.size - b.size || a.index - b.index);
+
+  const tracks = new Array<number>(memberSets.length).fill(0);
+  const placed: { members: Set<number>; track: number }[] = [];
+
+  for (const set of sets) {
+    const taken = new Set<number>();
+    for (const other of placed) {
+      for (const m of set.members) {
+        if (other.members.has(m)) {
+          taken.add(other.track);
+          break;
+        }
+      }
+    }
+    let track = 0;
+    while (taken.has(track)) track++;
+    tracks[set.index] = track;
+    placed.push({ members: set.members, track });
+  }
+
+  return tracks;
+}

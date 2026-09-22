@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Glottometry } from '../core/metrics.js';
-import { orderFor } from '../core/layout.js';
-import { parseMaramaCsv } from '../data/maramaCsv.js';
+import {
+  chainLayout, orderFor, planarLayout, projectGeographic, type Layout, type LayoutKind,
+} from '../core/layout.js';
+import { classicalMds, cohesivenessMatrix, distanceMatrix } from '../core/mds.js';
+import { parseCoordinatesCsv, parseMaramaCsv, type LanguageCoordinates } from '../data/maramaCsv.js';
 import { buildScene } from '../render/scene.js';
 import { Diagram } from '../render/Diagram.js';
 import { downloadSvg } from '../render/exportSvg.js';
@@ -9,17 +12,30 @@ import type { Dataset, NaPolicy } from '../core/types.js';
 
 const POLICIES: NaPolicy[] = ['half', 'zero', 'one', 'rowMean', 'colMean'];
 
+const LAYOUT_LABELS: Record<LayoutKind, string> = {
+  chain: 'chain',
+  mds: 'MDS (cohesiveness)',
+  geographic: 'geographic',
+};
+
 export function App() {
   const [dataset, setDataset] = useState<Dataset | null>(null);
+  const [coords, setCoords] = useState<LanguageCoordinates | null>(null);
   const [name, setName] = useState('demo');
   const [policy, setPolicy] = useState<NaPolicy>('half');
+  const [layoutKind, setLayoutKind] = useState<LayoutKind>('chain');
   const [minSigma, setMinSigma] = useState(1);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadDemo = useCallback(async () => {
     try {
-      setDataset(parseMaramaCsv(await fetch('demo/innov.csv').then((r) => r.text())));
+      const [inn, crd] = await Promise.all([
+        fetch('demo/innov.csv').then((r) => r.text()),
+        fetch('demo/coords.csv').then((r) => (r.ok ? r.text() : '')),
+      ]);
+      setDataset(parseMaramaCsv(inn));
+      setCoords(crd ? parseCoordinatesCsv(crd) : null);
       setName('demo');
       setError(null);
     } catch (e) {
@@ -31,30 +47,57 @@ export function App() {
     void loadDemo();
   }, [loadDemo]);
 
-  // Scored once per dataset+policy. Note this is independent of the threshold.
+  // Scored once per dataset+policy, independent of threshold and layout.
   const scored = useMemo(() => {
     if (!dataset) return null;
     const t0 = performance.now();
-    const subgroups = new Glottometry(dataset, policy).subgroups();
-    // Seriate on ALL subgroups so the layout does not move when the threshold
-    // does — see BUILD_PLAN.md, layout stability.
-    const { order } = orderFor(subgroups, dataset.languages.length);
-    return { subgroups, order, elapsedMs: performance.now() - t0 };
+    const g = new Glottometry(dataset, policy);
+    const subgroups = g.subgroups();
+    return { g, subgroups, elapsedMs: performance.now() - t0 };
   }, [dataset, policy]);
 
-  const scene = useMemo(() => {
-    if (!dataset || !scored) return null;
-    return buildScene(
-      scored.order,
-      dataset.languages,
-      scored.subgroups.filter((s) => s.sigma >= minSigma),
-    );
-  }, [dataset, scored, minSigma]);
+  const haveCoords = useMemo(
+    () => !!dataset && !!coords && dataset.languages.every((l) => coords[l]),
+    [dataset, coords],
+  );
 
-  const onFile = async (file: File) => {
+  const layout = useMemo((): Layout | null => {
+    if (!dataset || !scored) return null;
+    const { languages } = dataset;
+
+    if (layoutKind === 'geographic' && haveCoords) {
+      const points = projectGeographic(languages.map((l) => coords![l]!));
+      return planarLayout(points, languages, 'geographic');
+    }
+    if (layoutKind === 'mds') {
+      const points = classicalMds(distanceMatrix(cohesivenessMatrix(scored.g)), 2)
+        .map((c) => [c[0]!, c[1]!] as [number, number]);
+      return planarLayout(points, languages, 'mds');
+    }
+    // Seriate over ALL subgroups so the layout does not move when the
+    // threshold does — see BUILD_PLAN.md, layout stability.
+    const { order } = orderFor(scored.subgroups, languages.length);
+    return chainLayout(order, languages);
+  }, [dataset, scored, layoutKind, haveCoords, coords]);
+
+  const scene = useMemo(() => {
+    if (!layout || !scored) return null;
+    return buildScene(layout, scored.subgroups.filter((s) => s.sigma >= minSigma));
+  }, [layout, scored, minSigma]);
+
+  const onInnovations = async (file: File) => {
     try {
       setDataset(parseMaramaCsv(await file.text()));
       setName(file.name.replace(/\.csv$/i, ''));
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const onCoordinates = async (file: File) => {
+    try {
+      setCoords(parseCoordinatesCsv(await file.text()));
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -75,45 +118,56 @@ export function App() {
 
       <div style={S.controls}>
         <label>
-          CSV{' '}
-          <input
-            type="file"
-            accept=".csv,text/csv"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void onFile(f);
-            }}
-          />
+          innovations{' '}
+          <input type="file" accept=".csv,text/csv" onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void onInnovations(f);
+          }} />
+        </label>
+        <label>
+          coordinates{' '}
+          <input type="file" accept=".csv,text/csv" onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void onCoordinates(f);
+          }} />
         </label>
         <button onClick={() => void loadDemo()}>demo</button>
+      </div>
+
+      <div style={S.controls}>
+        <label>
+          layout{' '}
+          <select
+            value={layoutKind}
+            onChange={(e) => setLayoutKind(e.target.value as LayoutKind)}
+          >
+            {(Object.keys(LAYOUT_LABELS) as LayoutKind[]).map((k) => (
+              <option key={k} value={k} disabled={k === 'geographic' && !haveCoords}>
+                {LAYOUT_LABELS[k]}
+                {k === 'geographic' && !haveCoords ? ' — no coordinates' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
         <label>
           NA{' '}
           <select value={policy} onChange={(e) => setPolicy(e.target.value as NaPolicy)}>
-            {POLICIES.map((p) => (
-              <option key={p} value={p}>{p}</option>
-            ))}
+            {POLICIES.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
         </label>
         <label style={S.slider}>
           ς ≥ {minSigma.toFixed(2)}
           <input
-            type="range"
-            min={0}
-            max={6}
-            step={0.05}
-            value={minSigma}
+            type="range" min={0} max={6} step={0.05} value={minSigma}
             onChange={(e) => setMinSigma(Number(e.target.value))}
           />
         </label>
         <button
           disabled={!scene}
-          onClick={() =>
-            scene &&
-            downloadSvg(scene, `${name}-glottometry`, {
-              title: `Glottometric diagram — ${name}`,
-              subtitle: `${shown} subgroups with ς ≥ ${minSigma.toFixed(2)} · NA policy: ${policy}`,
-            })
-          }
+          onClick={() => scene && downloadSvg(scene, `${name}-glottometry`, {
+            title: `Glottometric diagram — ${name}`,
+            subtitle: `${shown} subgroups with ς ≥ ${minSigma.toFixed(2)} · ${LAYOUT_LABELS[layoutKind]} layout · NA: ${policy}`,
+          })}
         >
           export SVG
         </button>
@@ -125,13 +179,10 @@ export function App() {
         <>
           <p style={S.stats}>
             {dataset.innovations.length} innovations × {dataset.languages.length} languages
-            → {scored.subgroups.length} attested subgroups, <strong>{shown}</strong> drawn
+            → {scored.subgroups.length} attested, <strong>{shown}</strong> drawn
             {scene.splitCount > 0 && (
-              <>
-                {' '}· <span style={S.warn}>{scene.splitCount} split across the ordering</span>
-              </>
-            )}{' '}
-            · {scored.elapsedMs.toFixed(0)} ms
+              <> · <span style={S.warn}>{scene.splitCount} in multiple regions</span></>
+            )}
           </p>
 
           <div style={S.stage}>
@@ -170,22 +221,15 @@ const S: Record<string, React.CSSProperties> = {
     gap: '1rem',
     flexWrap: 'wrap',
     alignItems: 'center',
-    padding: '0.7rem 0',
-    margin: '0.8rem 0',
+    padding: '0.55rem 0',
     borderTop: '1px solid #ddd',
-    borderBottom: '1px solid #ddd',
     fontSize: '0.82rem',
   },
   slider: { display: 'flex', gap: '0.4rem', alignItems: 'center' },
   error: { color: '#b00', fontFamily: 'monospace', fontSize: '0.8rem' },
-  stats: { fontSize: '0.82rem', color: '#444' },
+  stats: { fontSize: '0.82rem', color: '#444', marginTop: '0.8rem' },
   warn: { color: '#a60' },
-  stage: {
-    display: 'flex',
-    justifyContent: 'center',
-    padding: '0.5rem 0',
-    overflowX: 'auto',
-  },
+  stage: { display: 'flex', justifyContent: 'center', padding: '0.5rem 0', overflowX: 'auto' },
   readout: {
     fontSize: '0.85rem',
     minHeight: '1.5em',

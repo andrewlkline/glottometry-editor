@@ -1,26 +1,34 @@
 /**
- * Builds a renderable scene from scored subgroups.
+ * Builds a renderable scene from scored subgroups and a layout.
  *
  * Pure and DOM-free: the React component and the standalone SVG exporter both
  * consume this, so what you see on screen and what lands in the .svg cannot
  * drift apart.
+ *
+ * Contour geometry is chosen by layout kind. A chain layout gets rounded
+ * rectangles, because seriation makes each subgroup a contiguous run. A 2-D
+ * layout gets routed blobs, which cost more but can wrap any arrangement of
+ * members while excluding whatever sits among them.
  */
 
 import type { Subgroup } from '../core/types.js';
-import { chainLayout, runsOf, type Layout } from '../core/layout.js';
-import { assignTracks } from '../geometry/tracks.js';
+import { runsOf, type Layout } from '../core/layout.js';
+import { assignTracks, assignTracksByOverlap } from '../geometry/tracks.js';
 import { capsuleFor, verticalPadding } from '../geometry/capsule.js';
+import { blobFor } from '../geometry/blob.js';
+import type { Point } from '../geometry/marchingSquares.js';
 import { contourStyle, type ContourStyle } from './styles.js';
 
 export interface ContourShape {
   key: string;
   subgroup: Subgroup;
-  /** One path per contiguous run of members. */
+  /** One path per connected region of the contour. */
   paths: string[];
-  /** Outer-edge connectors, present only when the subgroup is split. */
+  /** Outer-edge connectors, chain layout only. */
   connectors: string[];
   style: ContourStyle;
   track: number;
+  /** True when the contour is a single connected region. */
   contiguous: boolean;
 }
 
@@ -29,55 +37,47 @@ export interface Scene {
   contours: ContourShape[];
   width: number;
   height: number;
-  /** Subgroups that could not be drawn as a single stadium. */
+  /** Subgroups drawn as more than one region. */
   splitCount: number;
 }
 
 export interface SceneOptions {
-  nodeRadius?: number;
-  spacing?: number;
   trackGap?: number;
   basePadding?: number;
-  /** Extra room beyond the widest contour. */
+  /** Extra room beyond the widest contour, chain layout only. */
   pagePadding?: number;
+  /** Grid resolution for blob contours. Smaller is finer and slower. */
+  blobResolution?: number;
 }
 
 export function buildScene(
-  order: number[],
-  labels: string[],
+  layout: Layout,
   subgroups: Subgroup[],
   opts: SceneOptions = {},
 ): Scene {
-  const {
-    nodeRadius = 13,
-    spacing = 46,
-    trackGap = 7,
-    basePadding = 8,
-    pagePadding = 28,
-  } = opts;
+  return layout.kind === 'chain'
+    ? chainScene(layout, subgroups, opts)
+    : planarScene(layout, subgroups, opts);
+}
 
-  const position = new Array<number>(labels.length);
-  order.forEach((language, pos) => {
-    position[language] = pos;
-  });
+function chainScene(layout: Layout, subgroups: Subgroup[], opts: SceneOptions): Scene {
+  const { trackGap = 7, basePadding = 8 } = opts;
+  const { nodeRadius, spacing, position } = layout;
 
   const runsPerSubgroup = subgroups.map((s) => runsOf(s.members, position));
   const tracks = assignTracks(runsPerSubgroup.map((runs) => ({ runs })));
-
-  // The widest contour sets the column offset, so nothing is clipped.
   const maxTrack = tracks.length ? Math.max(...tracks) : 0;
-  const maxHalfWidth = nodeRadius + basePadding + maxTrack * trackGap;
-  const margin = maxHalfWidth + pagePadding;
-
-  const layout = chainLayout(order, labels, { nodeRadius, spacing, margin });
   const maxSigma = subgroups.reduce((m, s) => Math.max(m, s.sigma), 0);
+
+  const cx = layout.nodes[0]?.x ?? layout.width / 2;
+  const top = layout.nodes[0]?.y ?? 0;
 
   const contours: ContourShape[] = subgroups.map((subgroup, i) => {
     const runs = runsPerSubgroup[i]!;
     const track = tracks[i]!;
     const { paths, connectors } = capsuleFor(runs, {
-      cx: layout.nodes[0]?.x ?? margin,
-      top: layout.nodes[0]?.y ?? 0,
+      cx,
+      top,
       spacing,
       halfWidth: nodeRadius + basePadding + track * trackGap,
       verticalPadding: verticalPadding(track, maxTrack, basePadding, spacing, nodeRadius),
@@ -94,13 +94,66 @@ export function buildScene(
     };
   });
 
-  // Draw widest first so thin, strong inner contours stay legible on top.
   contours.sort((a, b) => b.track - a.track);
 
   return {
     layout,
     contours,
-    width: margin * 2,
+    width: layout.width,
+    height: layout.height,
+    splitCount: contours.filter((c) => !c.contiguous).length,
+  };
+}
+
+function planarScene(layout: Layout, subgroups: Subgroup[], opts: SceneOptions): Scene {
+  const { trackGap = 7, basePadding = 10, blobResolution = 4 } = opts;
+  const { nodeRadius } = layout;
+
+  const tracks = assignTracksByOverlap(subgroups.map((s) => s.members));
+  const maxSigma = subgroups.reduce((m, s) => Math.max(m, s.sigma), 0);
+
+  const pointOf = (language: number): Point => {
+    const node = layout.nodes.find((n) => n.language === language)!;
+    return [node.x, node.y];
+  };
+  const allPoints = new Map<number, Point>(
+    layout.nodes.map((n) => [n.language, [n.x, n.y] as Point]),
+  );
+
+  const contours: ContourShape[] = subgroups.map((subgroup, i) => {
+    const track = tracks[i]!;
+    const memberSet = new Set(subgroup.members);
+    const members = subgroup.members.map(pointOf);
+    const nonMembers = [...allPoints.entries()]
+      .filter(([language]) => !memberSet.has(language))
+      .map(([, point]) => point);
+
+    // Each track sits a little further out, which is what keeps overlapping
+    // contours distinguishable — the 2-D equivalent of the chain's nesting.
+    const { paths, rings } = blobFor(members, nonMembers, {
+      memberRadius: nodeRadius * 3.1 + basePadding + track * trackGap,
+      nonMemberRadius: nodeRadius * 2.3,
+      exclusionRadius: nodeRadius * 1.45,
+      resolution: blobResolution,
+    });
+
+    return {
+      key: subgroup.members.join(','),
+      subgroup,
+      paths,
+      connectors: [],
+      style: contourStyle(subgroup.sigma, subgroup.kappa, { maxSigma }),
+      track,
+      contiguous: rings.length <= 1,
+    };
+  });
+
+  contours.sort((a, b) => b.track - a.track);
+
+  return {
+    layout,
+    contours,
+    width: layout.width,
     height: layout.height,
     splitCount: contours.filter((c) => !c.contiguous).length,
   };
