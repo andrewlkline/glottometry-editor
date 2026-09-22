@@ -3,9 +3,10 @@
 A GUI tool for building **glottometric diagrams**: the wave-model alternative
 to family trees developed by Siva Kalyan and Alexandre François.
 
-**Status: Phase 0 complete.** The computational core is built, tested and
-verified in a browser; the diagram renderer that is the actual point of the
-project is Phase 1 and does not exist yet. See [BUILD_PLAN.md](BUILD_PLAN.md).
+**Status: Phase 1 complete.** It computes, renders and exports a glottometric
+diagram in the style of K&F's published figure, with live thresholding and
+hover-to-isolate. Still to come: the innovation-matrix editor, 2-D layouts and
+the contested-settings panel. See [BUILD_PLAN.md](BUILD_PLAN.md).
 
 ## What the method is
 
@@ -197,13 +198,44 @@ shebang resolves to the old v14.
 ### Layout
 
 ```
-src/core/        metrics, candidate enumeration, seriation — pure, no DOM
+src/core/        metrics, candidates, seriation, chain layout — pure, no DOM
+src/geometry/    tracks (interval colouring), capsule (contour paths)
+src/render/      scene, Diagram.tsx, styles, exportSvg
 src/data/        Marama CSV import/export
-src/ui/App.tsx   Phase 0 placeholder; Phase 1 replaces it
+src/ui/App.tsx   the app
 prototype/       Python reference implementation + demo data
 tools/           fixture generation
-tests/           parity, invariants, CSV, Marama baseline
+tests/           parity, invariants, CSV, Marama baseline, geometry, scene
 ```
+
+### How the diagram is built
+
+1. Score every attested subgroup (`core/metrics`).
+2. Seriate **all** of them into a 1-D order (`core/layout`) — see *layout
+   stability* below.
+3. Assign each displayed subgroup a nesting track by interval colouring
+   (`geometry/tracks`): any two whose position ranges overlap get different
+   widths, whether they nest or merely cross.
+4. Emit a rounded rectangle per contiguous run (`geometry/capsule`), sized by
+   track.
+5. Style by ς (thickness) and κ (colour intensity), and render or export
+   (`render/`).
+
+### Layout stability
+
+The ordering is computed from the **full** subgroup set, not from whatever is
+currently above the display threshold. Recomputing per threshold reshuffles
+12–18 of 18 nodes per slider step, because with few subgroups many orderings
+tie at zero cost and the search returns an arbitrary one. Seriating once moves
+no nodes at any threshold and costs two contours' worth of contiguity at ς ≥ 1.
+
+### Contour containment
+
+Every member is inside its contour and every non-member outside — the property
+the Marama engine's convex hulls violate. Horizontal padding grows freely with
+the nesting track; vertical padding is capped at `spacing - nodeRadius`, or a
+wide outer contour would swallow the neighbouring node. `tests/scene.test.ts`
+asserts this for every displayed subgroup.
 
 ### The two-implementation setup
 
@@ -234,18 +266,22 @@ contour-engine design, phasing and risks.
 ## Status / open questions
 
 - [x] Computational core built in TypeScript, at parity with Python.
-- [x] Seriation fast enough for live editing (279 ms, was 12 s in Python).
+- [x] Seriation fast enough for live editing (~320 ms for the whole pipeline).
 - [x] `epsilon >= 1` and whole-family exclusion corrected to match the paper.
-- [ ] **Phase 1 — the diagram renderer — not started.** This is the project.
+- [x] **Phase 1 — diagram renderer, live thresholding, SVG export.**
+- [x] Layout stability resolved: seriate once, threshold filters drawing only.
+- [ ] Node colours by MDS on cohesiveness (K&F 2018: 84 fn. 13) — deferred.
+- [ ] BubbleSets for split subgroups; 3 of 31 currently draw as separate runs
+      joined by a connector. Honest, but a routed contour would be better.
+- [ ] 2-D layouts. Figure 5-11 branches around Mota–Nume–Dorig–Mwerlap and a
+      chain cannot express that.
+- [ ] Phase 2: matrix editor, contested-settings panel, project save/load.
 - [ ] NA-handling scheme still does not match the official engine. Settled
       policy: document ours, match rankings. Resolving it properly means asking
       the authors.
 - [ ] Candidate-generation difference unexplained: they list 673 subgroups, we
       list 155. Ours is now a clean subset of theirs, so they generate groups
       that are not any innovation's exact pattern — by some means unknown.
-- [ ] Layout instability under thresholding — the seriated order reshuffles as
-      the threshold slider moves, because many orderings tie at cost 0. Needs a
-      tie-breaker before Phase 1's renderer is built.
 - [ ] No contact with Kalyan/François. They invite it ("feel free to contact
       us"), and they would be the natural first users and reviewers.
 - [x] Under git. No remote yet.

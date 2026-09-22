@@ -1,60 +1,26 @@
-/**
- * Phase 0 placeholder.
- *
- * This is NOT the product. It exists to prove the core runs unchanged in a
- * browser and that the CSV -> metrics -> seriation pipeline is wired up. The
- * diagram renderer it will be replaced by is Phase 1 (BUILD_PLAN.md §4).
- */
-
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Glottometry } from '../core/metrics.js';
-import { countBreaks, seriate } from '../core/seriation.js';
+import { orderFor } from '../core/layout.js';
 import { parseMaramaCsv } from '../data/maramaCsv.js';
-import type { Dataset, NaPolicy, Subgroup } from '../core/types.js';
+import { buildScene } from '../render/scene.js';
+import { Diagram } from '../render/Diagram.js';
+import { downloadSvg } from '../render/exportSvg.js';
+import type { Dataset, NaPolicy } from '../core/types.js';
 
 const POLICIES: NaPolicy[] = ['half', 'zero', 'one', 'rowMean', 'colMean'];
 
-interface Analysis {
-  subgroups: Subgroup[];
-  order: string[];
-  contiguous: number;
-  shown: number;
-  elapsedMs: number;
-}
-
-function analyse(dataset: Dataset, policy: NaPolicy, minSigma: number): Analysis {
-  const t0 = performance.now();
-  const subgroups = new Glottometry(dataset, policy).subgroups();
-  const shown = subgroups.filter((s) => s.sigma >= minSigma);
-  const masks = shown.map((s) => {
-    const m = new Array<boolean>(dataset.languages.length).fill(false);
-    for (const i of s.members) m[i] = true;
-    return m;
-  });
-  const { order } = seriate(masks, shown.map((s) => s.sigma), dataset.languages.length, {
-    seed: 0,
-    restarts: 20,
-  });
-  return {
-    subgroups,
-    order: order.map((i) => dataset.languages[i]!),
-    contiguous: masks.filter((m) => countBreaks(order, m) === 0).length,
-    shown: shown.length,
-    elapsedMs: performance.now() - t0,
-  };
-}
-
 export function App() {
   const [dataset, setDataset] = useState<Dataset | null>(null);
+  const [name, setName] = useState('demo');
   const [policy, setPolicy] = useState<NaPolicy>('half');
   const [minSigma, setMinSigma] = useState(1);
-  const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [highlighted, setHighlighted] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadDemo = useCallback(async () => {
     try {
-      const text = await fetch('demo/innov.csv').then((r) => r.text());
-      setDataset(parseMaramaCsv(text));
+      setDataset(parseMaramaCsv(await fetch('demo/innov.csv').then((r) => r.text())));
+      setName('demo');
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -65,36 +31,51 @@ export function App() {
     void loadDemo();
   }, [loadDemo]);
 
-  useEffect(() => {
-    if (!dataset) return;
-    try {
-      setAnalysis(analyse(dataset, policy, minSigma));
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
-  }, [dataset, policy, minSigma]);
+  // Scored once per dataset+policy. Note this is independent of the threshold.
+  const scored = useMemo(() => {
+    if (!dataset) return null;
+    const t0 = performance.now();
+    const subgroups = new Glottometry(dataset, policy).subgroups();
+    // Seriate on ALL subgroups so the layout does not move when the threshold
+    // does — see BUILD_PLAN.md, layout stability.
+    const { order } = orderFor(subgroups, dataset.languages.length);
+    return { subgroups, order, elapsedMs: performance.now() - t0 };
+  }, [dataset, policy]);
+
+  const scene = useMemo(() => {
+    if (!dataset || !scored) return null;
+    return buildScene(
+      scored.order,
+      dataset.languages,
+      scored.subgroups.filter((s) => s.sigma >= minSigma),
+    );
+  }, [dataset, scored, minSigma]);
 
   const onFile = async (file: File) => {
     try {
       setDataset(parseMaramaCsv(await file.text()));
+      setName(file.name.replace(/\.csv$/i, ''));
       setError(null);
     } catch (e) {
       setError(String(e));
     }
   };
 
-  return (
-    <main style={styles.main}>
-      <h1 style={styles.h1}>Glottometry — core check</h1>
-      <p style={styles.note}>
-        Phase 0 placeholder: confirms the metrics and seriation run in the
-        browser. The diagram renderer is Phase 1.
-      </p>
+  const shown = scene?.contours.length ?? 0;
+  const hovered = scene?.contours.find((c) => c.key === highlighted)?.subgroup;
 
-      <div style={styles.controls}>
+  return (
+    <main style={S.main}>
+      <header>
+        <h1 style={S.h1}>Historical Glottometry</h1>
+        <p style={S.sub}>
+          Thickness ∝ subgroupiness (ς) · colour intensity ∝ cohesiveness (κ)
+        </p>
+      </header>
+
+      <div style={S.controls}>
         <label>
-          Marama CSV:{' '}
+          CSV{' '}
           <input
             type="file"
             accept=".csv,text/csv"
@@ -104,19 +85,17 @@ export function App() {
             }}
           />
         </label>
-        <button onClick={() => void loadDemo()} style={styles.button}>
-          reload demo
-        </button>
+        <button onClick={() => void loadDemo()}>demo</button>
         <label>
-          NA policy:{' '}
+          NA{' '}
           <select value={policy} onChange={(e) => setPolicy(e.target.value as NaPolicy)}>
             {POLICIES.map((p) => (
               <option key={p} value={p}>{p}</option>
             ))}
           </select>
         </label>
-        <label>
-          ς ≥ {minSigma.toFixed(2)}{' '}
+        <label style={S.slider}>
+          ς ≥ {minSigma.toFixed(2)}
           <input
             type="range"
             min={0}
@@ -126,76 +105,92 @@ export function App() {
             onChange={(e) => setMinSigma(Number(e.target.value))}
           />
         </label>
+        <button
+          disabled={!scene}
+          onClick={() =>
+            scene &&
+            downloadSvg(scene, `${name}-glottometry`, {
+              title: `Glottometric diagram — ${name}`,
+              subtitle: `${shown} subgroups with ς ≥ ${minSigma.toFixed(2)} · NA policy: ${policy}`,
+            })
+          }
+        >
+          export SVG
+        </button>
       </div>
 
-      {error && <p style={styles.error}>{error}</p>}
+      {error && <p style={S.error}>{error}</p>}
 
-      {dataset && analysis && (
+      {dataset && scored && scene && (
         <>
-          <p style={styles.stats}>
+          <p style={S.stats}>
             {dataset.innovations.length} innovations × {dataset.languages.length} languages
-            → <strong>{analysis.subgroups.length}</strong> attested subgroups,{' '}
-            <strong>{analysis.shown}</strong> above threshold,{' '}
-            <strong>{analysis.contiguous}/{analysis.shown}</strong> contiguous in the
-            seriated order ({analysis.elapsedMs.toFixed(0)} ms).
+            → {scored.subgroups.length} attested subgroups, <strong>{shown}</strong> drawn
+            {scene.splitCount > 0 && (
+              <>
+                {' '}· <span style={S.warn}>{scene.splitCount} split across the ordering</span>
+              </>
+            )}{' '}
+            · {scored.elapsedMs.toFixed(0)} ms
           </p>
-          <p style={styles.order}>{analysis.order.join('  ')}</p>
 
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>ς</th>
-                <th style={styles.th}>κ</th>
-                <th style={styles.th}>ε</th>
-                <th style={{ ...styles.th, textAlign: 'left' }}>members</th>
-              </tr>
-            </thead>
-            <tbody>
-              {analysis.subgroups
-                .filter((s) => s.sigma >= minSigma)
-                .map((s) => (
-                  <tr key={s.members.join(',')}>
-                    <td style={styles.td}>{s.sigma.toFixed(2)}</td>
-                    <td style={styles.td}>{s.kappa.toFixed(2)}</td>
-                    <td style={styles.td}>{s.epsilon.toFixed(2)}</td>
-                    <td style={{ ...styles.td, textAlign: 'left' }}>
-                      {s.memberNames.join(' + ')}
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
+          <div style={S.stage}>
+            <Diagram scene={scene} highlighted={highlighted} onHover={setHighlighted} />
+          </div>
+
+          <div style={S.readout}>
+            {hovered ? (
+              <span>
+                <strong>{hovered.memberNames.join(' + ')}</strong>
+                {'  '}ς {hovered.sigma.toFixed(2)} · κ {hovered.kappa.toFixed(2)} · ε{' '}
+                {hovered.epsilon.toFixed(2)}
+              </span>
+            ) : (
+              <span style={S.hint}>hover a contour for its values</span>
+            )}
+          </div>
         </>
       )}
     </main>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
+const S: Record<string, React.CSSProperties> = {
   main: {
     fontFamily: 'system-ui, sans-serif',
-    maxWidth: 860,
+    maxWidth: 900,
     margin: '0 auto',
-    padding: '2rem 1rem',
+    padding: '1.5rem 1rem 3rem',
     lineHeight: 1.5,
   },
-  h1: { fontSize: '1.4rem', marginBottom: '0.25rem' },
-  note: { color: '#666', fontSize: '0.85rem', marginTop: 0 },
+  h1: { fontSize: '1.3rem', margin: 0 },
+  sub: { color: '#666', fontSize: '0.8rem', margin: '0.15rem 0 0' },
   controls: {
     display: 'flex',
     gap: '1rem',
     flexWrap: 'wrap',
     alignItems: 'center',
-    padding: '0.75rem 0',
+    padding: '0.7rem 0',
+    margin: '0.8rem 0',
     borderTop: '1px solid #ddd',
     borderBottom: '1px solid #ddd',
-    fontSize: '0.85rem',
+    fontSize: '0.82rem',
   },
-  button: { fontSize: '0.85rem' },
+  slider: { display: 'flex', gap: '0.4rem', alignItems: 'center' },
   error: { color: '#b00', fontFamily: 'monospace', fontSize: '0.8rem' },
-  stats: { fontSize: '0.9rem' },
-  order: { fontFamily: 'monospace', fontSize: '0.85rem', color: '#444' },
-  table: { borderCollapse: 'collapse', width: '100%', fontSize: '0.85rem' },
-  th: { textAlign: 'right', borderBottom: '2px solid #333', padding: '0.3rem 0.5rem' },
-  td: { textAlign: 'right', borderBottom: '1px solid #eee', padding: '0.25rem 0.5rem' },
+  stats: { fontSize: '0.82rem', color: '#444' },
+  warn: { color: '#a60' },
+  stage: {
+    display: 'flex',
+    justifyContent: 'center',
+    padding: '0.5rem 0',
+    overflowX: 'auto',
+  },
+  readout: {
+    fontSize: '0.85rem',
+    minHeight: '1.5em',
+    textAlign: 'center',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  hint: { color: '#999' },
 };

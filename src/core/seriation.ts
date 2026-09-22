@@ -12,10 +12,27 @@
  */
 
 export interface SeriationOptions {
+  /** Upper bound on restarts; `patience` usually stops the search sooner. */
   restarts?: number;
+  /**
+   * Stop after this many consecutive restarts fail to improve on the best
+   * ordering found. Easy datasets converge in two or three restarts and get
+   * out quickly; hard ones still get the full budget. Set to `Infinity` to
+   * always run every restart.
+   */
+  patience?: number;
   iterations?: number;
   /** Deterministic when supplied — tests depend on this. */
   seed?: number;
+  /**
+   * Preferred ordering, used only to break ties between orderings that score
+   * equally on breaks. Without it the search returns an arbitrary member of
+   * the tied set, so a chain and its mirror image are equally likely and the
+   * diagram can come out upside down for no reason. Pass the dataset's own
+   * language order: real datasets are conventionally sorted geographically
+   * (K&F sort theirs north-west to south-east).
+   */
+  reference?: number[];
 }
 
 export interface SeriationResult {
@@ -66,7 +83,9 @@ export function seriate(
   nLanguages: number,
   opts: SeriationOptions = {},
 ): SeriationResult {
-  const { restarts = 20, iterations = 6000, seed = 0 } = opts;
+  const {
+    restarts = 20, patience = 3, iterations = 6000, seed = 0, reference,
+  } = opts;
   const nSubs = masks.length;
 
   if (nSubs === 0 || nLanguages === 0) {
@@ -86,10 +105,29 @@ export function seriate(
     }
   }
 
+  // Tie-break weight. Chosen so the largest possible displacement penalty is
+  // still smaller than the cheapest single break: the tie-break may reorder
+  // within a tied set, never override a real contiguity gain.
+  const refPos = new Int32Array(nLanguages);
+  let lambda = 0;
+  if (reference && reference.length === nLanguages) {
+    for (let i = 0; i < nLanguages; i++) refPos[reference[i]!] = i;
+    const minWeight = Math.min(...weights.filter((w) => w > 0));
+    const maxDisplacement = (nLanguages * nLanguages) / 2 || 1;
+    lambda = (minWeight * 0.5) / maxDisplacement;
+  }
+
+  const displacement = (order: number[]): number => {
+    if (lambda === 0) return 0;
+    let d = 0;
+    for (let pos = 0; pos < nLanguages; pos++) d += Math.abs(pos - refPos[order[pos]!]!);
+    return d;
+  };
+
   const random = rng(seed);
   const cache = new Float64Array(nSubs); // per-subgroup break counts
 
-  const recomputeAll = (order: number[]): number => {
+  const breakCost = (order: number[]): number => {
     let cost = 0;
     for (let g = 0; g < nSubs; g++) {
       const b = countBreaks(order, masks[g]!);
@@ -99,9 +137,13 @@ export function seriate(
     return cost;
   };
 
+  const recomputeAll = (order: number[]): number =>
+    breakCost(order) + lambda * displacement(order);
+
   let bestOrder: number[] | null = null;
   let bestCost = Infinity;
   let bestBreaks: number[] = [];
+  let sinceImprovement = 0;
 
   for (let restart = 0; restart < restarts; restart++) {
     // Fisher-Yates shuffle for the starting order.
@@ -138,6 +180,12 @@ export function seriate(
         for (const g of touched) {
           delta += weights[g]! * (countBreaks(order, masks[g]!) - cache[g]!);
         }
+        if (lambda !== 0) {
+          // Only positions i and j changed occupant, so this is O(1).
+          const before = Math.abs(i - refPos[a]!) + Math.abs(j - refPos[b]!);
+          const after = Math.abs(i - refPos[b]!) + Math.abs(j - refPos[a]!);
+          delta += lambda * (after - before);
+        }
       } else {
         // Segment reversal moves many languages; recompute everything.
         const [lo, hi] = i < j ? [i, j] : [j, i];
@@ -148,7 +196,7 @@ export function seriate(
         for (let g = 0; g < nSubs; g++) {
           newCost += weights[g]! * countBreaks(order, masks[g]!);
         }
-        delta = newCost - cost;
+        delta = newCost + lambda * displacement(order) - cost;
       }
 
       const accept =
@@ -176,12 +224,17 @@ export function seriate(
 
     // Guard against drift from incremental bookkeeping.
     cost = recomputeAll(order);
-    if (cost < bestCost) {
+    if (cost < bestCost - 1e-12) {
       bestCost = cost;
       bestOrder = [...order];
       bestBreaks = Array.from(cache);
+      sinceImprovement = 0;
+    } else if (++sinceImprovement >= patience) {
+      break;
     }
   }
 
-  return { order: bestOrder!, cost: bestCost, breaks: bestBreaks };
+  // Report the break cost alone. The tie-break term is an internal nudge
+  // between equally-good orderings, not part of what the layout is judged on.
+  return { order: bestOrder!, cost: breakCost(bestOrder!), breaks: bestBreaks };
 }

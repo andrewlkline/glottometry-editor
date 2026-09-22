@@ -203,15 +203,71 @@ arrangement); or add a small penalty on displacement from the previous layout
 so it deforms continuously rather than jumping. Decide before building the
 renderer, because it constrains the layout API.
 
-### Phase 1 — static renderer *(4–6 days)*
+### Phase 1 — static renderer — **DONE**
 
-Load a Marama CSV → compute → render → export SVG. Capsule contours, chain
-layout, correct nesting offsets, ς/κ styling. No interactivity yet.
+Load a Marama CSV → compute → render → export SVG. Rounded-rectangle contours,
+chain layout, nesting offsets by interval colouring, ς/κ styling.
 
 *Done when*: the demo dataset renders as a legible diagram in the style of
-Figure 5-11, and the exported SVG opens cleanly in Illustrator with sane layer
-structure. **This alone already beats the existing tool** — worth showing to
-François and Kalyan at this point.
+Figure 5-11, and the exported SVG opens cleanly in a vector editor with sane
+layer structure. — **met**. 95 tests. The export parses as clean XML, renders
+standalone, and carries one named `<g data-subgroup="...">` per isogloss with
+ς/κ/ε as data attributes, so a vector editor gives named selectable groups
+rather than a pile of paths.
+
+Hover-to-isolate landed early, because it was the cheapest answer to the
+density risk and the diagram needed it to be readable at all at ς ≥ 1.
+
+#### Layout stability — resolved
+
+**Seriate once over the full subgroup set; the threshold filters only what is
+drawn, never the layout.** Measured on the demo data:
+
+| | re-seriate per threshold | seriate once |
+|---|---|---|
+| nodes moved per slider step | 12–18 of 18 | **0** |
+| contiguous at ς ≥ 1 | 30/31 | 28/31 |
+| contiguous at ς ≥ 2 and above | identical | identical |
+| resulting order | scrambled | the natural chain ⓁA→ⓁR |
+
+Two contours' worth of contiguity buys total stability and a cleaner canonical
+ordering. A tie-break term was also added to `seriate`: among orderings that
+score equally on breaks, prefer the one closest to a reference order (the
+dataset's own column order, which is conventionally geographic). Without it
+the search returns an arbitrary member of the tied set and the chain can come
+out mirrored for no reason. Its weight is derived to stay below the cheapest
+single break, so it can never override a real contiguity gain.
+
+#### The containment bug
+
+Capping the corner radius made wide contours *look* right, but vertical
+padding still equalled half-width, so a wide outer contour swallowed the
+neighbouring non-member nodes. Horizontal and vertical padding are now
+independent: horizontal grows freely with the track (that is where nesting
+room comes from), vertical is compressed to fit `spacing - nodeRadius` so a
+non-member is never enclosed.
+
+This is the same class of error as the Marama engine's convex hulls, arrived
+at from a different direction, and it is now a property test: every member
+inside its contour, every non-member outside, for every displayed subgroup.
+
+#### Performance
+
+Seriation gained early stopping (halt after `patience` restarts without
+improvement). Full pipeline on load went 1265 ms → ~320 ms with identical cost
+and ordering. Restart counts from 2 to 20 all converge on this dataset, so a
+fixed low number would have been overfitting to it; early stopping adapts.
+
+#### Deferred out of Phase 1
+
+- **MDS node colours.** K&F colour nodes by 3-D MDS on pairwise cohesiveness
+  mapped to RGB (2018: 84 fn. 13). Needs an eigendecomposition, is independent
+  of the contour work, and is better done properly than approximated.
+- **BubbleSets.** Split subgroups (3 of 31 here) currently draw one shape per
+  contiguous run plus a dashed connector. That is honest — it never encloses a
+  non-member — but a routed contour would be better.
+- **2-D layouts.** Figure 5-11 itself branches around Mota–Nume–Dorig–Mwerlap;
+  the chain cannot express that. Geographic and MDS layouts are Phase 2.
 
 ### Phase 2 — make it an editor *(3–4 days)*
 
