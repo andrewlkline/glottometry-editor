@@ -13,6 +13,14 @@ export interface DiagramProps {
   onReorder?: (language: number, toPosition: number) => void;
   /** 2-D layouts: the user dragged a node to a new place on the canvas. */
   onMove?: (language: number, x: number, y: number) => void;
+  /**
+   * The drag finished.
+   *
+   * A drag emits an edit per pointer move; this marks where the gesture ends
+   * so history can treat the whole thing as one undo, rather than relying on
+   * the coalescing time window to guess.
+   */
+  onDragEnd?: () => void;
 }
 
 /**
@@ -28,7 +36,7 @@ export interface DiagramProps {
  * is free, so a node simply moves and the routed contours reflow around it.
  */
 export function Diagram({
-  scene, highlighted, selected, hidden, onHover, onSelect, onReorder, onMove,
+  scene, highlighted, selected, hidden, onHover, onSelect, onReorder, onMove, onDragEnd,
 }: DiagramProps) {
   const { layout, contours, width, height } = scene;
   const svgRef = useRef<SVGSVGElement>(null);
@@ -134,6 +142,12 @@ export function Diagram({
               if (dragging === null) return;
               (e.target as Element).releasePointerCapture(e.pointerId);
               setDragging(null);
+              onDragEnd?.();
+            }}
+            onPointerCancel={() => {
+              if (dragging === null) return;
+              setDragging(null);
+              onDragEnd?.();
             }}
           >
             <circle

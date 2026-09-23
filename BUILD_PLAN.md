@@ -349,10 +349,10 @@ cut out. `tests/helpers.ts` adds a self-intersection check (proper crossings
 plus collinear overlap, which is how a zero-width corridor shows up) and an
 enclosed-area check. With those, all six routing mutations are caught.
 
-### Phase 2 — make it an editor — **mostly done**
+### Phase 2 — make it an editor — **DONE**
 
 *Done when*: a diagram can be taken from raw CSV to publication-ready without
-opening a vector editor. — **met**, apart from undo/redo.
+opening a vector editor. — **met**.
 
 - **Evidence inspector.** Click a contour, or a row in the subgroup list, and
   see the innovations that produced its score, split into exclusive (totalling
@@ -382,12 +382,34 @@ appends languages the saved order did not mention, so an edited dataset
 degrades to a partial match instead of silently scrambling or throwing the
 arrangement away.
 
-#### Still open
+- **Undo/redo** over the whole project, with `⌘Z` / `⌘⇧Z` (and `Ctrl+Y`).
 
-- **Undo/redo.** The only Phase 2 item not built. `reset layout` covers the
-  common case (discard manual positions), but a general history stack would be
-  better, and is the natural next increment since all edits already flow
-  through a single `patch` on one project object.
+#### Coalescing is the whole problem
+
+Snapshots rather than diffs: a project is a shallow object whose bulk — the
+dataset — is shared by reference and never mutated, so a snapshot costs a
+handful of fields and the simpler model wins.
+
+What actually needs care is merging. A drag emits an edit per pointer move and
+the slider one per step, so without coalescing a single gesture would take
+fifty undos; merge too eagerly and one undo throws away work done minutes
+apart. Two mechanisms, deliberately separate:
+
+- a **coalesce key** (`move:3`, `minSigma`) merges consecutive edits that share
+  one, so a whole gesture is a single entry;
+- a **recency window** (700 ms) stops a return to the same node much later from
+  silently extending the earlier entry.
+
+`seal`, dispatched on pointer-up, closes the open entry explicitly. The window
+is the fallback for edits with no natural end, not the primary signal.
+
+Discrete actions — hiding a subgroup, switching layout — carry no key and so
+never merge. Opening a file calls `reset` rather than recording an edit:
+undoing back into a previous dataset would be more confusing than useful.
+
+Verified in the browser: one drag is one undo, one slider sweep from ς 1.00 to
+4.80 is one undo, and two hides are two. Timestamps are injectable so
+`tests/history.test.ts` exercises the window directly instead of sleeping.
 
 ### Phase 2 — original scope *(for reference)*
 

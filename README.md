@@ -3,12 +3,13 @@
 A GUI tool for building **glottometric diagrams**: the wave-model alternative
 to family trees developed by Siva Kalyan and Alexandre François.
 
-**Status: Phases 1 and 2 done** (bar undo/redo). It computes, renders and
+**Status: Phases 1 and 2 done.** It computes, renders and
 exports glottometric diagrams in three layouts — chain, MDS on cohesiveness,
 geographic — with live thresholding, draggable languages, per-contour
 visibility, an evidence inspector showing which innovations produced each
-score, and `.glot.json` project save/load. Still to come: the innovation-matrix
-editor and the contested-settings panel. See [BUILD_PLAN.md](BUILD_PLAN.md).
+score, undo/redo, and `.glot.json` project save/load. Still to come: the
+innovation-matrix editor and the contested-settings panel. See
+[BUILD_PLAN.md](BUILD_PLAN.md).
 
 ## What the method is
 
@@ -222,6 +223,17 @@ is not drawing.
 This is the question a comparativist actually has, and no existing tool answers
 it. The Marama engine returns totals; the published tables stop at ε, κ and ς.
 
+### Undo/redo
+
+Snapshots over the project object, which is cheap because the dataset is shared
+by reference and never mutated. The interesting part is coalescing: a drag
+emits an edit per pointer move, so consecutive edits sharing a **coalesce key**
+(`move:3`, `minSigma`) merge into one entry, and a 700 ms **recency window**
+stops a much later return to the same node from extending it. Pointer-up
+dispatches `seal`, which closes the entry explicitly — the window is a fallback
+for edits with no natural end. Discrete actions carry no key and never merge;
+opening a file resets history rather than recording an edit.
+
 ### Layouts
 
 | layout | positions from | contours |
@@ -331,9 +343,8 @@ contour-engine design, phasing and risks.
       connected shape whichever layout is in use.
 - [x] Evidence inspector, subgroup visibility, draggable languages,
       `.glot.json` project save/load.
-- [ ] Undo/redo. `reset layout` covers the common case; a general history stack
-      is the natural next increment, since every edit already flows through one
-      `patch` on a single project object.
+- [x] Undo/redo (`⌘Z` / `⌘⇧Z`), coalescing each drag or slider sweep into a
+      single entry.
 - [ ] Innovation-matrix editor and the contested-settings panel (ε vs ς cutoff,
       type filters, Fisher's exact).
 - [ ] NA-handling scheme still does not match the official engine. Settled

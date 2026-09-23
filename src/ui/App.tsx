@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useHistory } from './history.js';
 import { Glottometry } from '../core/metrics.js';
 import {
   chainLayout, orderFor, planarLayout, projectGeographic, type Layout, type LayoutKind,
@@ -23,7 +24,8 @@ const LAYOUT_LABELS: Record<LayoutKind, string> = {
 };
 
 export function App() {
-  const [project, setProject] = useState<Project | null>(null);
+  const history = useHistory<Project | null>(null);
+  const project = history.state;
   const [selected, setSelected] = useState<string | null>(null);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +36,7 @@ export function App() {
         fetch('demo/innov.csv').then((r) => r.text()),
         fetch('demo/coords.csv').then((r) => (r.ok ? r.text() : '')),
       ]);
-      setProject(createProject(
+      history.reset(createProject(
         'demo', parseMaramaCsv(inn), crd ? parseCoordinatesCsv(crd) : undefined,
       ));
       setSelected(null);
@@ -42,17 +44,47 @@ export function App() {
     } catch (e) {
       setError(String(e));
     }
-  }, []);
+  }, [history]);
 
-  useEffect(() => { void loadDemo(); }, [loadDemo]);
+  useEffect(() => { void loadDemo(); }, []);
 
-  const patch = useCallback((changes: Partial<Project>) => {
-    setProject((p) => (p ? { ...p, ...changes } : p));
-  }, []);
+  // Cmd/Ctrl+Z and Cmd/Ctrl+Shift+Z (or Ctrl+Y), skipped while typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (!(e.metaKey || e.ctrlKey)) return;
 
-  const setSettings = useCallback((changes: Partial<Project['settings']>) => {
-    setProject((p) => (p ? { ...p, settings: { ...p.settings, ...changes } } : p));
-  }, []);
+      const key = e.key.toLowerCase();
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        history.undo();
+      } else if ((key === 'z' && e.shiftKey) || key === 'y') {
+        e.preventDefault();
+        history.redo();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [history]);
+
+  /** Every mutation goes through here, which is what makes undo tractable. */
+  const patch = useCallback(
+    (changes: Partial<Project>, label: string, coalesceKey?: string) => {
+      history.set((p) => (p ? { ...p, ...changes } : p), label, coalesceKey);
+    },
+    [history],
+  );
+
+  const setSettings = useCallback(
+    (changes: Partial<Project['settings']>, label: string, coalesceKey?: string) => {
+      history.set(
+        (p) => (p ? { ...p, settings: { ...p.settings, ...changes } } : p),
+        label, coalesceKey,
+      );
+    },
+    [history],
+  );
 
   const dataset = project?.dataset ?? null;
   const settings = project?.settings ?? null;
@@ -127,13 +159,13 @@ export function App() {
     try {
       const text = await file.text();
       if (kind === 'project') {
-        setProject(parseProject(text));
+        history.reset(parseProject(text));
       } else if (kind === 'innovations') {
-        setProject(createProject(
+        history.reset(createProject(
           file.name.replace(/\.csv$/i, ''), parseMaramaCsv(text), project?.coordinates,
         ));
       } else {
-        patch({ coordinates: parseCoordinatesCsv(text) });
+        patch({ coordinates: parseCoordinatesCsv(text) }, 'load coordinates');
       }
       setSelected(null);
       setError(null);
@@ -149,18 +181,27 @@ export function App() {
     if (from === -1 || from === toPosition) return;
     order.splice(from, 1);
     order.splice(toPosition, 0, language);
-    patch({ manualOrder: order.map((i) => dataset.languages[i]!) });
+    patch(
+      { manualOrder: order.map((i) => dataset.languages[i]!) },
+      `reorder ${dataset.languages[language]}`,
+      `reorder:${language}`,
+    );
   }, [layout, dataset, patch]);
 
   const onMove = useCallback((language: number, x: number, y: number) => {
     if (!dataset) return;
     const label = dataset.languages[language]!;
-    setProject((p) => (p
-      ? { ...p, manualPositions: { ...(p.manualPositions ?? {}), [label]: [x, y] } }
-      : p));
-  }, [dataset]);
+    history.set(
+      (p) => (p
+        ? { ...p, manualPositions: { ...(p.manualPositions ?? {}), [label]: [x, y] } }
+        : p),
+      `move ${label}`,
+      `move:${language}`,
+    );
+  }, [dataset, history]);
 
-  const resetLayout = () => patch({ manualOrder: undefined, manualPositions: undefined });
+  const resetLayout = () =>
+    patch({ manualOrder: undefined, manualPositions: undefined }, 'reset layout');
   const edited = !!(project?.manualOrder || project?.manualPositions);
 
   if (!project || !dataset || !settings) {
@@ -189,7 +230,7 @@ export function App() {
           layout{' '}
           <select
             value={settings.layoutKind}
-            onChange={(e) => setSettings({ layoutKind: e.target.value as LayoutKind })}
+            onChange={(e) => setSettings({ layoutKind: e.target.value as LayoutKind }, 'change layout')}
           >
             {(Object.keys(LAYOUT_LABELS) as LayoutKind[]).map((k) => (
               <option key={k} value={k} disabled={k === 'geographic' && !haveCoords}>
@@ -202,7 +243,7 @@ export function App() {
           NA{' '}
           <select
             value={settings.policy}
-            onChange={(e) => setSettings({ policy: e.target.value as NaPolicy })}
+            onChange={(e) => setSettings({ policy: e.target.value as NaPolicy }, 'change NA policy')}
           >
             {POLICIES.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
@@ -211,9 +252,28 @@ export function App() {
           ς ≥ {settings.minSigma.toFixed(2)}
           <input
             type="range" min={0} max={6} step={0.05} value={settings.minSigma}
-            onChange={(e) => setSettings({ minSigma: Number(e.target.value) })}
+            onChange={(e) => setSettings({ minSigma: Number(e.target.value) }, 'change threshold', 'minSigma')}
           />
         </label>
+        <span style={S.undoGroup}>
+          <button
+            onClick={history.undo}
+            disabled={!history.canUndo}
+            title={history.canUndo ? `Undo ${history.undoLabel ?? ''}` : 'Nothing to undo'}
+          >
+            ↶ undo
+          </button>
+          <button
+            onClick={history.redo}
+            disabled={!history.canRedo}
+            title={history.canRedo ? `Redo ${history.redoLabel ?? ''}` : 'Nothing to redo'}
+          >
+            ↷ redo
+          </button>
+          {history.canUndo && history.undoLabel && (
+            <span style={S.undoLabel}>{history.undoLabel}</span>
+          )}
+        </span>
         {edited && <button onClick={resetLayout} title="Discard manual positions">reset layout</button>}
         <span style={S.spacer} />
         <button onClick={() => downloadProject(project)}>save project</button>
@@ -251,12 +311,19 @@ export function App() {
               hidden={hidden}
               onSelect={setSelected}
               onHover={setHighlighted}
-              onToggleHidden={(key) => patch({
-                hidden: hidden.has(key)
-                  ? [...hidden].filter((k) => k !== key)
-                  : [...hidden, key],
-              })}
-              onShowAll={() => patch({ hidden: [] })}
+              onToggleHidden={(key) => {
+                const contour = scene.contours.find((c) => c.key === key);
+                const name = contour?.subgroup.memberNames.join('+') ?? 'subgroup';
+                patch(
+                  {
+                    hidden: hidden.has(key)
+                      ? [...hidden].filter((k) => k !== key)
+                      : [...hidden, key],
+                  },
+                  `${hidden.has(key) ? 'show' : 'hide'} ${name}`,
+                );
+              }}
+              onShowAll={() => patch({ hidden: [] }, 'show all subgroups')}
             />
 
             <div style={S.stage}>
@@ -269,6 +336,7 @@ export function App() {
                 onSelect={setSelected}
                 onReorder={onReorder}
                 onMove={onMove}
+                onDragEnd={history.seal}
               />
             </div>
 
@@ -337,6 +405,11 @@ const S: Record<string, React.CSSProperties> = {
   },
   slider: { display: 'flex', gap: '0.4rem', alignItems: 'center' },
   spacer: { flex: 1 },
+  undoGroup: { display: 'flex', gap: '0.3rem', alignItems: 'center' },
+  undoLabel: {
+    color: '#999', fontSize: '0.72rem', maxWidth: 150,
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  },
   error: { color: '#b00', fontFamily: 'monospace', fontSize: '0.78rem' },
   stats: { fontSize: '0.78rem', color: '#444', margin: '0.7rem 0 0.4rem' },
   warn: { color: '#a60' },
