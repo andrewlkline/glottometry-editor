@@ -465,6 +465,45 @@ that caveat would overstate what the method supports — so it belongs in the
 same pattern as the rest of the settings panel: implement the proposal, show
 the dispute.
 
+### Fixes from the first real dataset
+
+An eastern Timor file — 5 languages, 31 innovations, geographic layout — broke
+the 2-D renderer in three ways the 18-language demo had been hiding. All three
+came from the same root: the demo's density and its three-letter labels.
+
+**Contours came apart, one blob per member.** Five languages spread over the
+canvas eighteen occupied sit three to four times further apart, and the blob
+radius was a fixed multiple of the node radius. Two members only merge when the
+radius is at least ~0.65× their separation — the falloff has compact support —
+so at 128px apart with a 50px radius their fields never touched. Every subgroup
+fragmented.
+
+Scaling the radius to the gap worked but ballooned the shapes: to bridge 251px
+the contour has to enclose a great deal of empty space. The fix is to seed the
+field along a **spanning-tree backbone** between members rather than only at
+the members themselves, which is what BubbleSets does with its routed edges.
+The radius stays tight to the nodes and the contour comes out as a band
+following the connections. It improved the 18-language views too.
+
+**Labels did not fit.** K&F's figures use three-letter codes (HIW, LTG), and a
+circle sized for those cannot hold "Kairui-Midiki". Nodes are now pills sized
+to their text, truncating with a tooltip past a cap, rather than silently
+abbreviating someone else's language names.
+
+**Contours were clipped.** Node positions are laid out first and contours drawn
+around them, so a contour can reach outside the node canvas. 2-D scenes now
+carry a `viewBox` cropped to what was drawn — which also removes the empty
+bands a square canvas leaves around a wide, flat family. Node coordinates are
+untouched, so saved manual positions keep meaning what they meant.
+
+#### The containment test was checking a reconstruction
+
+It rebuilt blobs from hardcoded parameters rather than reading what the scene
+drew, so it went on passing while the renderer's geometry changed underneath
+it — which is exactly how the fragmentation shipped. `ContourShape` now carries
+its rings and the test asserts against those. A regression test using the Timor
+coordinates pins the sparse case.
+
 ### Phase 3 — matrix editor — **DONE**
 
 *Done when*: a new dataset can be built from scratch in the app, and a Marama

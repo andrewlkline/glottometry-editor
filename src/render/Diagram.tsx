@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import type { Scene } from './scene.js';
-import { NODE_FILL, NODE_STROKE, NODE_TEXT } from './styles.js';
+import { fitLabel, labelHalfWidth, NODE_FILL, NODE_STROKE, NODE_TEXT } from './styles.js';
 
 export interface DiagramProps {
   scene: Scene;
@@ -47,7 +47,7 @@ export function Diagram({
   scene, highlighted, selected, hidden, onHover, onSelect, onReorder, onMove, onDragEnd,
   nodeFill,
 }: DiagramProps) {
-  const { layout, contours, width, height } = scene;
+  const { layout, contours, width, height, viewBox } = scene;
   const svgRef = useRef<SVGSVGElement>(null);
   const [dragging, setDragging] = useState<number | null>(null);
 
@@ -87,7 +87,7 @@ export function Diagram({
   return (
     <svg
       ref={svgRef}
-      viewBox={`0 0 ${width} ${height}`}
+      viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`}
       width={width}
       height={height}
       role="img"
@@ -95,8 +95,10 @@ export function Diagram({
       style={{ maxWidth: '100%', height: 'auto', display: 'block', touchAction: 'none' }}
     >
       <rect
-        width={width}
-        height={height}
+        x={viewBox.x}
+        y={viewBox.y}
+        width={viewBox.width}
+        height={viewBox.height}
         fill="#fff"
         onClick={() => onSelect?.(null)}
       />
@@ -159,29 +161,54 @@ export function Diagram({
               onDragEnd?.();
             }}
           >
-            <circle
-              cx={n.x}
-              cy={n.y}
-              r={layout.nodeRadius}
+            <NodeShape
+              node={n}
+              nodeRadius={layout.nodeRadius}
               fill={nodeFill?.(n.language) ?? NODE_FILL}
-              stroke={dragging === n.language ? '#06c' : NODE_STROKE}
-              strokeWidth={dragging === n.language ? 2 : 1.2}
+              active={dragging === n.language}
             />
-            <text
-              x={n.x}
-              y={n.y}
-              textAnchor="middle"
-              dominantBaseline="central"
-              fontFamily="system-ui, sans-serif"
-              fontSize={11}
-              fill={NODE_TEXT}
-              style={{ userSelect: 'none', pointerEvents: 'none' }}
-            >
-              {n.label}
-            </text>
           </g>
         ))}
       </g>
     </svg>
+  );
+}
+
+/** A node drawn as a pill wide enough for its label. */
+function NodeShape({ node, nodeRadius, fill, active }: {
+  node: { x: number; y: number; label: string };
+  nodeRadius: number;
+  fill: string;
+  active: boolean;
+}) {
+  const half = labelHalfWidth(node.label, nodeRadius);
+  const text = fitLabel(node.label, half);
+
+  return (
+    <>
+      <rect
+        x={node.x - half}
+        y={node.y - nodeRadius}
+        width={half * 2}
+        height={nodeRadius * 2}
+        rx={nodeRadius}
+        fill={fill}
+        stroke={active ? '#06c' : NODE_STROKE}
+        strokeWidth={active ? 2 : 1.2}
+      />
+      <text
+        x={node.x}
+        y={node.y}
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontFamily="system-ui, sans-serif"
+        fontSize={11}
+        fill={NODE_TEXT}
+        style={{ userSelect: 'none', pointerEvents: 'none' }}
+      >
+        {text}
+        {text !== node.label && <title>{node.label}</title>}
+      </text>
+    </>
   );
 }

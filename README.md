@@ -311,6 +311,13 @@ layouts say things a chain cannot — on the demo data MDS shows ⓁA+ⓁB genui
 detached from the rest, which the chain flattens into "the top of the column" —
 at the cost of needing the general contour engine.
 
+Contour radii do **not** scale with the node radius. Two members only merge
+into one shape when the radius reaches ~0.65× their separation, so a value
+tuned for eighteen languages leaves five in the same canvas fragmenting into
+one blob per member. The field is seeded along a spanning-tree backbone between
+members instead, which keeps the radius tight to the nodes while the shape
+stays connected.
+
 Both 2-D layouts apply **overlap relaxation**. MDS places a tightly-knit
 cluster almost on a single point, which is exactly the interesting case in a
 linkage, so nodes closer than a minimum are pushed apart while a weak spring

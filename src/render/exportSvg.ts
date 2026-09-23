@@ -9,7 +9,7 @@
  */
 
 import type { Scene } from './scene.js';
-import { NODE_FILL, NODE_STROKE, NODE_TEXT } from './styles.js';
+import { fitLabel, labelHalfWidth, NODE_FILL, NODE_STROKE, NODE_TEXT } from './styles.js';
 
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;')
@@ -26,7 +26,7 @@ export interface ExportOptions {
 }
 
 export function exportSvg(scene: Scene, opts: ExportOptions = {}): string {
-  const { layout, contours, width, height } = scene;
+  const { layout, contours, width, height, viewBox } = scene;
   const { title = 'Glottometric diagram', subtitle, nodeFill } = opts;
 
   const captionHeight = subtitle ? 26 : 0;
@@ -36,10 +36,13 @@ export function exportSvg(scene: Scene, opts: ExportOptions = {}): string {
   lines.push('<?xml version="1.0" encoding="UTF-8"?>');
   lines.push(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${totalHeight}" ` +
-      `viewBox="0 0 ${width} ${totalHeight}">`,
+      `viewBox="${viewBox.x} ${viewBox.y} ${viewBox.width} ${totalHeight}">`,
   );
   lines.push(`  <title>${esc(title)}</title>`);
-  lines.push(`  <rect width="${width}" height="${totalHeight}" fill="#ffffff"/>`);
+  lines.push(
+    `  <rect x="${viewBox.x}" y="${viewBox.y}" width="${viewBox.width}" ` +
+      `height="${totalHeight}" fill="#ffffff"/>`,
+  );
 
   lines.push('  <g id="isoglosses" fill="none" stroke-linejoin="round" stroke-linecap="round">');
   for (const c of contours) {
@@ -65,13 +68,19 @@ export function exportSvg(scene: Scene, opts: ExportOptions = {}): string {
   for (const n of layout.nodes) {
     lines.push(`    <g data-language="${esc(n.label)}">`);
     lines.push(
-      `      <circle cx="${n.x}" cy="${n.y}" r="${layout.nodeRadius}" ` +
-        `fill="${nodeFill?.(n.language) ?? NODE_FILL}" ` +
-        `stroke="${NODE_STROKE}" stroke-width="1.2"/>`,
+      (() => {
+        const half = labelHalfWidth(n.label, layout.nodeRadius);
+        return `      <rect x="${(n.x - half).toFixed(2)}" ` +
+          `y="${(n.y - layout.nodeRadius).toFixed(2)}" ` +
+          `width="${(half * 2).toFixed(2)}" height="${layout.nodeRadius * 2}" ` +
+          `rx="${layout.nodeRadius}" fill="${nodeFill?.(n.language) ?? NODE_FILL}" ` +
+          `stroke="${NODE_STROKE}" stroke-width="1.2"/>`;
+      })(),
     );
     lines.push(
       `      <text x="${n.x}" y="${n.y}" text-anchor="middle" ` +
-        `dominant-baseline="central" fill="${NODE_TEXT}">${esc(n.label)}</text>`,
+        `dominant-baseline="central" fill="${NODE_TEXT}">` +
+        `${esc(fitLabel(n.label, labelHalfWidth(n.label, layout.nodeRadius)))}</text>`,
     );
     lines.push('    </g>');
   }
@@ -79,7 +88,7 @@ export function exportSvg(scene: Scene, opts: ExportOptions = {}): string {
 
   if (subtitle) {
     lines.push(
-      `  <text x="${width / 2}" y="${totalHeight - 9}" text-anchor="middle" ` +
+      `  <text x="${viewBox.x + viewBox.width / 2}" y="${viewBox.y + totalHeight - 9}" text-anchor="middle" ` +
         `font-family="system-ui, sans-serif" font-size="10" fill="#666">${esc(subtitle)}</text>`,
     );
   }

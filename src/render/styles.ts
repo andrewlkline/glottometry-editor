@@ -68,3 +68,31 @@ export function cohesivenessColour(kappa: number): string {
 export const NODE_FILL = '#f7f7f5';
 export const NODE_STROKE = '#333';
 export const NODE_TEXT = '#111';
+
+/**
+ * Half-width of a node sized to hold its label.
+ *
+ * K&F's figures use three-letter codes (HIW, LTG, LHI), and a circle sized for
+ * those cannot hold "Kairui-Midiki". Rather than silently abbreviating someone
+ * else's language names, the node grows into a pill. Beyond `maxHalfWidth` the
+ * label is truncated and the full name kept in a tooltip.
+ *
+ * Width is estimated from character count — measuring text needs a DOM, and
+ * the exporter has to produce identical geometry headlessly. The factor is
+ * tuned for system-ui at the label size; being a little generous is harmless,
+ * since the only cost is a slightly wide node.
+ */
+export function labelHalfWidth(
+  label: string, nodeRadius: number, fontSize = 11, maxHalfWidth = 64,
+): number {
+  const estimated = label.length * fontSize * 0.55;
+  return Math.max(nodeRadius, Math.min(maxHalfWidth, estimated / 2 + 7));
+}
+
+/** The label as drawn, truncated when it cannot fit. */
+export function fitLabel(
+  label: string, halfWidth: number, fontSize = 11,
+): string {
+  const capacity = Math.floor((halfWidth * 2 - 10) / (fontSize * 0.55));
+  return label.length <= capacity ? label : `${label.slice(0, Math.max(1, capacity - 1))}…`;
+}

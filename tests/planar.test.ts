@@ -329,32 +329,85 @@ describe.each([
   });
 
   it('contains every member and excludes every non-member', () => {
-    // The whole reason routed contours exist rather than convex hulls.
-    const rebuilt = shown.map((s) => {
-      const memberSet = new Set(s.members);
-      const members = layout.nodes.filter((n) => memberSet.has(n.language))
-        .map((n) => [n.x, n.y] as Point);
-      const nonMembers = layout.nodes.filter((n) => !memberSet.has(n.language))
-        .map((n) => [n.x, n.y] as Point);
-      const track = scene.contours.find((c) => c.key === s.members.join(','))!.track;
-      return {
-        subgroup: s,
-        ...blobFor(members, nonMembers, {
-          memberRadius: layout.nodeRadius * 3.1 + 10 + track * 7,
-          nonMemberRadius: layout.nodeRadius * 2.3,
-          exclusionRadius: layout.nodeRadius * 1.45,
-          resolution: 4,
-        }),
-      };
-    });
+    // Checked against the rings the scene actually produced, not a
+    // reconstruction: re-deriving the geometry here would let the test go on
+    // passing after the renderer's parameters change, which is how the
+    // sparse-layout bug survived a green suite.
+    for (const contour of scene.contours) {
+      const rings = contour.rings!;
+      expect(rings, `${contour.key} has no rings`).toBeDefined();
+      const memberSet = new Set(contour.subgroup.members);
 
-    for (const { subgroup, rings } of rebuilt) {
-      const memberSet = new Set(subgroup.members);
       for (const node of layout.nodes) {
         const inside = pointInBlob([node.x, node.y], rings);
         expect(
           inside,
-          `${node.label} in ${subgroup.memberNames.join('+')}`,
+          `${node.label} in ${contour.subgroup.memberNames.join('+')}`,
+        ).toBe(memberSet.has(node.language));
+      }
+    }
+  });
+});
+
+describe('a sparse layout', () => {
+  /**
+   * Five languages spread over the same canvas eighteen would occupy sit
+   * three to four times further apart, and a contour radius tuned for the
+   * dense case cannot bridge the gap: every subgroup came apart into one blob
+   * per member. Coordinates here are the eastern Timor set that surfaced it.
+   */
+  const languages = ['Kairui-Midiki', 'Waima’a', 'Naueti', 'Habun', 'Tetun'];
+  const coordinates = [
+    { lat: -8.683515, lon: 126.332798 },
+    { lat: -8.500603, lon: 126.36677 },
+    { lat: -8.750454, lon: 126.695896 },
+    { lat: -8.67963, lon: 125.990486 },
+    { lat: -8.922276, lon: 126.275939 },
+  ];
+  const layout = planarLayout(projectGeographic(coordinates), languages, 'geographic');
+
+  const subgroup = (members: number[], sigma: number) => ({
+    members,
+    memberNames: members.map((m) => languages[m]!),
+    epsilon: sigma, kappa: 1, sigma, p: sigma, q: 0,
+    fisher: { a: 0, b: 0, c: 0, d: 0, pValue: 1, strength: 0 },
+    significance: 0,
+  });
+
+  // The three subgroups that dataset actually yields above the default cutoff.
+  const scene = buildScene(layout, [
+    subgroup([0, 1, 2], 8),
+    subgroup([3, 4], 2.86),
+    subgroup([0, 1, 2, 3], 2.15),
+  ]);
+
+  it('spreads the nodes much further apart than a dense layout', () => {
+    // If this stops holding the test no longer exercises the sparse case.
+    const gaps = layout.nodes.map((a) => Math.min(
+      ...layout.nodes.filter((b) => b !== a).map((b) => Math.hypot(a.x - b.x, a.y - b.y)),
+    ));
+    expect(Math.min(...gaps)).toBeGreaterThan(100);
+  });
+
+  it('draws each subgroup as one connected shape', () => {
+    for (const contour of scene.contours) {
+      expect(
+        contour.rings!.length,
+        `${contour.subgroup.memberNames.join('+')} came apart`,
+      ).toBe(1);
+    }
+    expect(scene.routedCount).toBe(0);
+  });
+
+  it('still contains members and excludes non-members', () => {
+    // The radius grew to bridge the gap; containment must not have been the
+    // price of that.
+    for (const contour of scene.contours) {
+      const memberSet = new Set(contour.subgroup.members);
+      for (const node of layout.nodes) {
+        expect(
+          pointInBlob([node.x, node.y], contour.rings!),
+          `${node.label} in ${contour.subgroup.memberNames.join('+')}`,
         ).toBe(memberSet.has(node.language));
       }
     }

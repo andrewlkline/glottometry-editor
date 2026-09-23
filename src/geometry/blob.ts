@@ -15,6 +15,59 @@
 
 import { isoContours, type Grid, type Point } from './marchingSquares.js';
 
+/**
+ * Field sources for a set of members: the members themselves, plus points
+ * sampled along a minimum spanning tree connecting them.
+ *
+ * Without the backbone, the only way to join members that sit far apart is to
+ * inflate the radius until their fields overlap — which works, but produces a
+ * balloon far larger than the languages it encloses. Seeding the field along
+ * the connections instead lets the radius stay tight to the nodes while the
+ * shape still comes out in one piece. This is what BubbleSets does with its
+ * routed edges.
+ */
+export function backboneOf(members: Point[], spacing: number): Point[] {
+  if (members.length < 2) return members;
+
+  const points: Point[] = [...members];
+  const reached = [0];
+  const remaining = new Set(members.map((_, i) => i));
+  remaining.delete(0);
+
+  while (remaining.size > 0) {
+    let best = Infinity;
+    let from = 0;
+    let to = -1;
+    for (const candidate of remaining) {
+      for (const inTree of reached) {
+        const d = Math.hypot(
+          members[candidate]![0] - members[inTree]![0],
+          members[candidate]![1] - members[inTree]![1],
+        );
+        if (d < best) {
+          best = d;
+          from = inTree;
+          to = candidate;
+        }
+      }
+    }
+
+    // Sample densely enough that consecutive samples' fields always overlap.
+    const a = members[from]!;
+    const b = members[to]!;
+    const steps = Math.max(1, Math.ceil(best / Math.max(1, spacing)));
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      points.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+    }
+
+    reached.push(to);
+    remaining.delete(to);
+  }
+
+  return points;
+}
+
 export interface BlobOptions {
   /** Radius of a member's influence. Larger = fatter, smoother blobs. */
   memberRadius: number;
@@ -78,10 +131,11 @@ function falloff(distanceSquared: number, radius: number): number {
  * cannot influence any grid point because the falloff has compact support.
  */
 export function blobField(
-  members: Point[],
+  sources: Point[],
   nonMembers: Point[],
   opts: BlobOptions,
 ): Grid {
+  const members = sources;
   const {
     memberRadius,
     nonMemberRadius,
@@ -248,7 +302,10 @@ export function blobFor(
   const smoothing = opts.smoothing ?? DEFAULT_BLOB.smoothing;
   const tolerance = opts.simplifyTolerance ?? DEFAULT_BLOB.simplifyTolerance;
 
-  const grid = blobField(members, nonMembers, opts);
+  // The backbone is what keeps the radius tight: joining distant members by
+  // inflating their fields would enclose far more space than the languages do.
+  const sources = backboneOf(members, opts.memberRadius * 0.5);
+  const grid = blobField(sources, nonMembers, opts);
   const rings = isoContours(grid, threshold)
     .map((r) => simplifyRing(smoothRing(r, smoothing), tolerance));
 

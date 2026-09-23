@@ -17,7 +17,7 @@ import { assignTracks, assignTracksByOverlap } from '../geometry/tracks.js';
 import { capsuleFor, verticalPadding } from '../geometry/capsule.js';
 import { blobFor } from '../geometry/blob.js';
 import type { Point } from '../geometry/marchingSquares.js';
-import { contourStyle, type ContourStyle } from './styles.js';
+import { contourStyle, labelHalfWidth, type ContourStyle } from './styles.js';
 
 export interface ContourShape {
   key: string;
@@ -32,6 +32,15 @@ export interface ContourShape {
    * renderer exists to handle — but worth surfacing.
    */
   routed: boolean;
+  /**
+   * The contour's polygons, for 2-D layouts.
+   *
+   * Carried so containment can be verified against what was actually drawn.
+   * Re-deriving the geometry in a test means the test keeps passing when the
+   * renderer's parameters change underneath it — which is exactly how the
+   * sparse-layout bug survived a green suite.
+   */
+  rings?: Point[][];
 }
 
 export interface Scene {
@@ -39,6 +48,16 @@ export interface Scene {
   contours: ContourShape[];
   width: number;
   height: number;
+  /**
+   * The region to actually display.
+   *
+   * Node positions are laid out first and contours drawn around them, so a
+   * contour can reach outside the node canvas — the more so now that its
+   * radius grows to bridge sparse layouts. The viewBox is widened to whatever
+   * was drawn rather than clipping it, and node coordinates are left alone so
+   * saved manual positions keep meaning what they meant.
+   */
+  viewBox: { x: number; y: number; width: number; height: number };
   /** Subgroups whose contour had to route around non-members. */
   routedCount: number;
 }
@@ -100,11 +119,15 @@ function chainScene(layout: Layout, subgroups: Subgroup[], opts: SceneOptions): 
 
   contours.sort((a, b) => b.track - a.track);
 
+  // The chain canvas is already sized around its widest contour, and chain
+  // contours are emitted as paths rather than rings, so there is nothing to
+  // crop to here — the layout bounds are the right view.
   return {
     layout,
     contours,
     width: layout.width,
     height: layout.height,
+    viewBox: { x: 0, y: 0, width: layout.width, height: layout.height },
     routedCount: contours.filter((c) => c.routed).length,
   };
 }
@@ -112,6 +135,8 @@ function chainScene(layout: Layout, subgroups: Subgroup[], opts: SceneOptions): 
 function planarScene(layout: Layout, subgroups: Subgroup[], opts: SceneOptions): Scene {
   const { trackGap = 7, basePadding = 10, blobResolution = 4 } = opts;
   const { nodeRadius } = layout;
+
+  const floor = nodeRadius * 3.1 + basePadding;
 
   const tracks = assignTracksByOverlap(subgroups.map((s) => s.members));
   const maxSigma = subgroups.reduce((m, s) => Math.max(m, s.sigma), 0);
@@ -134,9 +159,17 @@ function planarScene(layout: Layout, subgroups: Subgroup[], opts: SceneOptions):
 
     // Each track sits a little further out, which is what keeps overlapping
     // contours distinguishable — the 2-D equivalent of the chain's nesting.
+    // A backbone sampled along the subgroup's spanning tree carries the field
+    // between distant members (see blob.ts), so the radius no longer has to
+    // stretch to reach them and the contour stays close to the languages. It
+    // only needs to be wide enough to read as a shape.
+    const memberRadius = floor + track * trackGap;
+
     const { paths, rings } = blobFor(members, nonMembers, {
-      memberRadius: nodeRadius * 3.1 + basePadding + track * trackGap,
-      nonMemberRadius: nodeRadius * 2.3,
+      memberRadius,
+      nonMemberRadius: Math.max(nodeRadius * 2.3, memberRadius * 0.45),
+      // Tied to the node itself, not the layout: this is what guarantees a
+      // non-member's own circle stays outside, whatever the scale.
       exclusionRadius: nodeRadius * 1.45,
       resolution: blobResolution,
     });
@@ -148,16 +181,54 @@ function planarScene(layout: Layout, subgroups: Subgroup[], opts: SceneOptions):
       style: contourStyle(subgroup.sigma, subgroup.kappa, { maxSigma }),
       track,
       routed: rings.length > 1,
+      rings,
     };
   });
 
   contours.sort((a, b) => b.track - a.track);
 
+  // Crop to what was actually drawn rather than to the layout canvas. A
+  // geographic layout preserves the data's aspect ratio, so a wide, flat
+  // family leaves broad empty bands above and below inside a square canvas.
+  const pad = 16;
+  const nodeExtent = layout.nodes.map((n) => ({
+    x: n.x, y: n.y, half: labelHalfWidth(n.label, layout.nodeRadius),
+  }));
+  if (nodeExtent.length === 0) {
+    return {
+      layout, contours, width: layout.width, height: layout.height,
+      viewBox: { x: 0, y: 0, width: layout.width, height: layout.height },
+      routedCount: 0,
+    };
+  }
+  let minX = Math.min(...nodeExtent.map((n) => n.x - n.half));
+  let minY = Math.min(...nodeExtent.map((n) => n.y - layout.nodeRadius));
+  let maxX = Math.max(...nodeExtent.map((n) => n.x + n.half));
+  let maxY = Math.max(...nodeExtent.map((n) => n.y + layout.nodeRadius));
+  for (const contour of contours) {
+    for (const ring of contour.rings ?? []) {
+      for (const [x, y] of ring) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  const viewBox = {
+    x: minX - pad,
+    y: minY - pad,
+    width: (maxX - minX) + pad * 2,
+    height: (maxY - minY) + pad * 2,
+  };
+
   return {
     layout,
     contours,
-    width: layout.width,
-    height: layout.height,
+    width: viewBox.width,
+    height: viewBox.height,
+    viewBox,
     routedCount: contours.filter((c) => c.routed).length,
   };
 }
