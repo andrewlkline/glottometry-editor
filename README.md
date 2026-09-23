@@ -213,7 +213,7 @@ tests/           parity, invariants, CSV, Marama baseline, geometry, scene, plan
 
 | layout | positions from | contours |
 |---|---|---|
-| chain | seriation (1-D ordering) | rounded rectangles |
+| chain | seriation (1-D ordering) | rounded rectangles, routed when split |
 | MDS | classical scaling on `1 − κ` | routed blobs |
 | geographic | lat/long, equirectangular | routed blobs |
 
@@ -267,6 +267,14 @@ tests rather than by looking at the picture:
   non-member forces the field below the threshold there, which turns
   containment from a tuning question into a property of the construction.
 
+**Containment is not sufficient on its own.** Under the even-odd rule a
+self-intersecting outline can trace a region twice and cancel it, so a contour
+that renders visibly wrong still reports every member inside and every
+non-member outside. Mutation testing caught this: three of four deliberate
+breakages of the chain's routing passed the containment test. Contours are
+therefore also asserted to be **simple polygons** — no self-intersections, no
+collinear overlaps, non-zero area (`tests/helpers.ts`).
+
 ### The two-implementation setup
 
 `prototype/glottometry.py` is the reference; `src/core/` must match it to 1e-9.
@@ -306,9 +314,8 @@ contour-engine design, phasing and risks.
 - [x] Routed contours (marching squares over an attract/repel field), so a
       contour can wrap any arrangement of members and exclude what sits among
       them.
-- [ ] Back-port routed contours to the chain layout. 3 of 31 subgroups there
-      still draw as separate runs joined by a connector — honest, never
-      encloses a non-member, but a single routed shape would be better.
+- [x] Routed contours in the chain layout too, so every subgroup is one
+      connected shape whichever layout is in use.
 - [ ] Phase 2: matrix editor, contested-settings panel, project save/load.
 - [ ] NA-handling scheme still does not match the official engine. Settled
       policy: document ours, match rankings. Resolving it properly means asking

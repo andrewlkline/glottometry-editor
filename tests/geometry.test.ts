@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { assignTracks } from '../src/geometry/tracks.js';
-import { capsuleFor, maxVerticalPadding, verticalPadding } from '../src/geometry/capsule.js';
+import {
+  capsuleFor, maxVerticalPadding, roundedPolygon, verticalPadding,
+} from '../src/geometry/capsule.js';
+import { pointInRing } from '../src/geometry/blob.js';
+import type { Point } from '../src/geometry/marchingSquares.js';
 import { runsOf, chainLayout } from '../src/core/layout.js';
 import { cohesivenessColour, contourStyle } from '../src/render/styles.js';
 
@@ -105,13 +109,35 @@ describe('capsuleFor', () => {
   it('emits one path for a contiguous run', () => {
     const g = capsuleFor([[0, 2]], base);
     expect(g.paths).toHaveLength(1);
-    expect(g.connectors).toHaveLength(0);
+    expect(g.outlines[0]).toHaveLength(4);   // a plain rectangle
   });
 
-  it('emits a path per run plus connectors when split', () => {
+  it('emits a single routed outline when split', () => {
+    // One isogloss is one shape, even when its members are not adjacent.
     const g = capsuleFor([[0, 1], [4, 5]], base);
-    expect(g.paths).toHaveLength(2);
-    expect(g.connectors).toHaveLength(1);
+    expect(g.paths).toHaveLength(1);
+    expect(g.outlines[0]!.length).toBeGreaterThan(4);
+  });
+
+  it('routes around the non-members between runs', () => {
+    const g = capsuleFor([[0, 1], [4, 5]], base);
+    const outline = g.outlines[0]!;
+    const yOf = (pos: number) => base.top + pos * base.spacing;
+
+    for (const member of [0, 1, 4, 5]) {
+      expect(pointInRing([base.cx, yOf(member)], outline), `member ${member}`).toBe(true);
+    }
+    for (const excluded of [2, 3]) {
+      expect(pointInRing([base.cx, yOf(excluded)], outline), `excluded ${excluded}`)
+        .toBe(false);
+    }
+  });
+
+  it('keeps the corridor close to its own edge', () => {
+    // A corridor that swung far outward would collide with outer tracks.
+    const g = capsuleFor([[0, 1], [4, 5]], { ...base, corridorWidth: 8 });
+    const maxX = Math.max(...g.outlines[0]!.map((p) => p[0]));
+    expect(maxX).toBeLessThanOrEqual(base.cx + base.halfWidth + 4 + 1e-9);
   });
 
   it('encloses its end nodes vertically', () => {
@@ -142,6 +168,28 @@ describe('capsuleFor', () => {
     const g = capsuleFor([[0, 2]], base);
     expect(g.paths[0]).toMatch(/^M /);
     expect(g.paths[0]).toMatch(/Z$/);
+  });
+});
+
+describe('roundedPolygon', () => {
+  it('produces a closed path', () => {
+    const square: Point[] = [[0, 0], [10, 0], [10, 10], [0, 10]];
+    const d = roundedPolygon(square, 2);
+    expect(d).toMatch(/^M /);
+    expect(d).toMatch(/Z$/);
+  });
+
+  it('clamps the radius to half the shortest adjacent edge', () => {
+    // A corridor's step in and out is a very short edge; an unclamped radius
+    // there would produce a self-intersecting arc.
+    const thin: Point[] = [[0, 0], [2, 0], [2, 40], [0, 40]];
+    const radii = [...roundedPolygon(thin, 20).matchAll(/A ([\d.]+)/g)]
+      .map((m) => Number(m[1]));
+    expect(Math.max(...radii)).toBeLessThanOrEqual(1 + 1e-9);
+  });
+
+  it('returns nothing for a degenerate polygon', () => {
+    expect(roundedPolygon([[0, 0], [1, 1]], 2)).toBe('');
   });
 });
 

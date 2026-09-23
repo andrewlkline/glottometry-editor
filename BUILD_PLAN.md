@@ -263,10 +263,7 @@ fixed low number would have been overfitting to it; early stopping adapts.
 - **MDS node colours.** K&F colour nodes by 3-D MDS on pairwise cohesiveness
   mapped to RGB (2018: 84 fn. 13). The MDS machinery now exists (see below), so
   this is a small job whenever it is wanted.
-- **BubbleSets for the chain layout.** Split subgroups (3 of 31) still draw one
-  shape per contiguous run plus a dashed connector there. Honest, never
-  encloses a non-member, and the 2-D renderer now has a routed contour that
-  could be back-ported if it turns out to matter.
+- **BubbleSets for the chain layout.** Done — see Phase 1c.
 
 ### Phase 1b — 2-D layouts and routed contours — **DONE**
 
@@ -315,6 +312,42 @@ it, so the first 2-D export was **392 KB** against 17 KB for the chain — mostl
 near-collinear noise, bad for file size and worse for anyone opening it in a
 vector editor. Douglas-Peucker simplification at 0.6 world units brings it to
 **37 KB** with no visible change and containment tests still green.
+
+### Phase 1c — routed contours in the chain layout — **DONE**
+
+The last correctness gap in the chain renderer. A split subgroup used to draw
+as two rounded rectangles joined by a dashed line: never wrong, but it said
+"here are two shapes" where the data says "here is one isogloss".
+
+Routing in a column is not the same problem as in 2-D. The members sit on one
+vertical line, so a corridor connecting two runs has to pass to one *side* of
+the non-members between them. The outline goes down the right-hand side
+through corridors, then back up the left, tucking inside each corridor's inner
+edge on the way — twelve vertices for two runs, and the column between the runs
+finishes outside the shape. The corridor straddles the contour's own edge, so
+it reaches only half its width beyond the nominal track and barely disturbs
+outer contours.
+
+`roundedPolygon` replaced the bespoke rectangle path: it rounds any polygon,
+clamping each corner to half the shorter adjacent edge so the short step in and
+out of a corridor degrades to a sharp corner instead of a self-intersecting
+arc. Both the plain and routed cases now go through it.
+
+#### Containment is necessary but not sufficient
+
+Worth recording, because it nearly shipped. Mutation testing the new routing
+found that **three of four deliberate breakages were not caught** — including
+tucking the corridor on the wrong side, which visibly swallows the gap.
+
+The reason is the even-odd rule. A wrong-side corridor makes the outline
+self-intersect and trace the gap region *twice*, so a ray from a gap node
+crosses the boundary an even number of times and the point still reports as
+outside. The containment test passed on a shape that renders visibly wrong.
+
+The missing property is **simplicity**: a contour has to be a polygon you could
+cut out. `tests/helpers.ts` adds a self-intersection check (proper crossings
+plus collinear overlap, which is how a zero-width corridor shows up) and an
+enclosed-area check. With those, all six routing mutations are caught.
 
 ### Phase 2 — make it an editor *(3–4 days)*
 

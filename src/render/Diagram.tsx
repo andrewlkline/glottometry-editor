@@ -43,17 +43,8 @@ export function Diagram({ scene, highlighted, onHover }: DiagramProps) {
               style={{ cursor: onHover ? 'pointer' : undefined }}
             >
               {/* Invisible, generous hit area. */}
-              {[...c.paths, ...c.connectors].map((d, i) => (
+              {c.paths.map((d, i) => (
                 <path key={`hit-${i}`} d={d} stroke="transparent" strokeWidth={14} />
-              ))}
-              {c.connectors.map((d, i) => (
-                <path
-                  key={`conn-${i}`}
-                  d={d}
-                  stroke={c.style.stroke}
-                  strokeWidth={c.style.strokeWidth}
-                  strokeDasharray="2 5"
-                />
               ))}
               {c.paths.map((d, i) => (
                 <path

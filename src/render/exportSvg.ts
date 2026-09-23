@@ -52,9 +52,6 @@ export function exportSvg(scene: Scene, opts: ExportOptions = {}): string {
     lines.push(
       `      <title>${esc(label)} — ς ${sigma.toFixed(2)}, κ ${kappa.toFixed(2)}, ε ${epsilon.toFixed(2)}</title>`,
     );
-    for (const d of c.connectors) {
-      lines.push(`      <path d="${d}" stroke-dasharray="2 5"/>`);
-    }
     for (const d of c.paths) {
       lines.push(`      <path d="${d}"/>`);
     }

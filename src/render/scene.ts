@@ -24,12 +24,14 @@ export interface ContourShape {
   subgroup: Subgroup;
   /** One path per connected region of the contour. */
   paths: string[];
-  /** Outer-edge connectors, chain layout only. */
-  connectors: string[];
   style: ContourStyle;
   track: number;
-  /** True when the contour is a single connected region. */
-  contiguous: boolean;
+  /**
+   * True when the subgroup's members are not contiguous in the layout, so the
+   * contour had to route around non-members. Not a defect — it is what the
+   * renderer exists to handle — but worth surfacing.
+   */
+  routed: boolean;
 }
 
 export interface Scene {
@@ -37,8 +39,8 @@ export interface Scene {
   contours: ContourShape[];
   width: number;
   height: number;
-  /** Subgroups drawn as more than one region. */
-  splitCount: number;
+  /** Subgroups whose contour had to route around non-members. */
+  routedCount: number;
 }
 
 export interface SceneOptions {
@@ -75,7 +77,7 @@ function chainScene(layout: Layout, subgroups: Subgroup[], opts: SceneOptions): 
   const contours: ContourShape[] = subgroups.map((subgroup, i) => {
     const runs = runsPerSubgroup[i]!;
     const track = tracks[i]!;
-    const { paths, connectors } = capsuleFor(runs, {
+    const { paths } = capsuleFor(runs, {
       cx,
       top,
       spacing,
@@ -87,10 +89,12 @@ function chainScene(layout: Layout, subgroups: Subgroup[], opts: SceneOptions): 
       key: subgroup.members.join(','),
       subgroup,
       paths,
-      connectors,
       style: contourStyle(subgroup.sigma, subgroup.kappa, { maxSigma }),
       track,
-      contiguous: runs.length === 1,
+      // A routed outline is one connected shape even when the members are
+      // split, so this now records whether routing was needed, not whether
+      // the drawing is fragmented.
+      routed: runs.length > 1,
     };
   });
 
@@ -101,7 +105,7 @@ function chainScene(layout: Layout, subgroups: Subgroup[], opts: SceneOptions): 
     contours,
     width: layout.width,
     height: layout.height,
-    splitCount: contours.filter((c) => !c.contiguous).length,
+    routedCount: contours.filter((c) => c.routed).length,
   };
 }
 
@@ -141,10 +145,9 @@ function planarScene(layout: Layout, subgroups: Subgroup[], opts: SceneOptions):
       key: subgroup.members.join(','),
       subgroup,
       paths,
-      connectors: [],
       style: contourStyle(subgroup.sigma, subgroup.kappa, { maxSigma }),
       track,
-      contiguous: rings.length <= 1,
+      routed: rings.length > 1,
     };
   });
 
@@ -155,6 +158,6 @@ function planarScene(layout: Layout, subgroups: Subgroup[], opts: SceneOptions):
     contours,
     width: layout.width,
     height: layout.height,
-    splitCount: contours.filter((c) => !c.contiguous).length,
+    routedCount: contours.filter((c) => c.routed).length,
   };
 }

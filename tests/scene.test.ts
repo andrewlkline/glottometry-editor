@@ -11,7 +11,10 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Glottometry } from '../src/core/metrics.js';
-import { chainLayout, orderFor } from '../src/core/layout.js';
+import { chainLayout, orderFor, runsOf } from '../src/core/layout.js';
+import { capsuleFor, verticalPadding } from '../src/geometry/capsule.js';
+import { pointInRing } from '../src/geometry/blob.js';
+import { isSimplePolygon, signedArea } from './helpers.js';
 import { parseMaramaCsv } from '../src/data/maramaCsv.js';
 import { buildScene } from '../src/render/scene.js';
 import { exportSvg } from '../src/render/exportSvg.js';
@@ -25,16 +28,18 @@ const { order } = orderFor(all, dataset.languages.length);
 const layout = chainLayout(order, dataset.languages);
 const shown = all.filter((s) => s.sigma >= 1);
 const scene = buildScene(layout, shown);
+const maxTrack = Math.max(...scene.contours.map((c) => c.track));
 
-/** Bounding boxes of the rounded rectangles in a path, y-axis only. */
-function yRanges(paths: string[]): [number, number][] {
-  return paths.map((d) => {
-    const ys = [...d.matchAll(/[ML] -?[\d.]+ (-?[\d.]+)/g)].map((m) => Number(m[1]));
-    const arcs = [...d.matchAll(/A [\d.]+ [\d.]+ 0 0 1 -?[\d.]+ (-?[\d.]+)/g)].map((m) =>
-      Number(m[1]),
-    );
-    const all = [...ys, ...arcs];
-    return [Math.min(...all), Math.max(...all)] as [number, number];
+/** Rebuild a contour's geometry with the same parameters buildScene uses. */
+function outlineFor(track: number, runs: [number, number][]) {
+  return capsuleFor(runs, {
+    cx: scene.layout.nodes[0]!.x,
+    top: scene.layout.nodes[0]!.y,
+    spacing: scene.layout.spacing,
+    halfWidth: scene.layout.nodeRadius + 8 + track * 7,
+    verticalPadding: verticalPadding(
+      track, maxTrack, 8, scene.layout.spacing, scene.layout.nodeRadius,
+    ),
   });
 }
 
@@ -44,27 +49,67 @@ describe('scene on the demo dataset', () => {
     expect(shown.length).toBeGreaterThan(20);
   });
 
-  it('keeps almost every subgroup to a single contiguous contour', () => {
-    const contiguous = scene.contours.filter((c) => c.contiguous).length;
-    expect(contiguous / scene.contours.length).toBeGreaterThanOrEqual(0.85);
+  it('draws every subgroup as a single connected shape', () => {
+    // Routing means even a split subgroup is one outline, not two plus a hint.
+    for (const c of scene.contours) expect(c.paths).toHaveLength(1);
+  });
+
+  it('routes only the subgroups that are actually split', () => {
+    for (const c of scene.contours) {
+      const runs = runsOf(c.subgroup.members, scene.layout.position);
+      expect(c.routed).toBe(runs.length > 1);
+    }
+    expect(scene.routedCount).toBeGreaterThan(0);  // the demo data has some
+  });
+
+  it('produces a simple, non-degenerate outline for every contour', () => {
+    // Containment alone is satisfiable by a self-intersecting shape that
+    // traces a region twice and cancels it under even-odd. The contour also
+    // has to be a polygon you could cut out.
+    for (const c of scene.contours) {
+      const runs = runsOf(c.subgroup.members, scene.layout.position);
+      const { outlines } = outlineFor(c.track, runs);
+      for (const outline of outlines) {
+        expect(
+          isSimplePolygon(outline),
+          `${c.subgroup.memberNames.join('+')} self-intersects`,
+        ).toBe(true);
+        expect(
+          Math.abs(signedArea(outline)),
+          `${c.subgroup.memberNames.join('+')} encloses no area`,
+        ).toBeGreaterThan(1);
+      }
+    }
+  });
+
+  it('orders a routed outline from the topmost run downward', () => {
+    for (const c of scene.contours.filter((x) => x.routed)) {
+      const runs = runsOf(c.subgroup.members, scene.layout.position);
+      const { outlines } = outlineFor(c.track, runs);
+      const firstY = outlines[0]![0]![1];
+      const topNodeY = Math.min(
+        ...c.subgroup.members.map((m) => scene.layout.nodes
+          .find((n) => n.language === m)!.y),
+      );
+      expect(firstY).toBeLessThan(topNodeY);
+    }
   });
 
   it('contains every member and excludes every non-member', () => {
-    // The correctness property. Checked in the vertical axis, which is the
-    // only one that matters in a chain layout: all shapes are centred on the
-    // node column and are wider than the nodes.
+    // Point-in-polygon on the real outline, not bounding boxes: a routed
+    // contour's box spans the gap it deliberately excludes, so a box test
+    // would pass while the shape was wrong.
     for (const c of scene.contours) {
-      const ranges = yRanges(c.paths);
+      const runs = runsOf(c.subgroup.members, scene.layout.position);
+      const { outlines } = outlineFor(c.track, runs);
       const memberSet = new Set(c.subgroup.members);
 
       for (const node of scene.layout.nodes) {
-        const inside = ranges.some(([lo, hi]) => node.y >= lo && node.y <= hi);
-        const shouldBeInside = memberSet.has(node.language);
+        const inside = outlines.some((o) => pointInRing([node.x, node.y], o));
         expect(
           inside,
-          `${node.label} ${shouldBeInside ? 'should' : 'should not'} be inside ` +
-            `${c.subgroup.memberNames.join('+')}`,
-        ).toBe(shouldBeInside);
+          `${node.label} in ${c.subgroup.memberNames.join('+')}`,
+        ).toBe(memberSet.has(node.language));
       }
     }
   });

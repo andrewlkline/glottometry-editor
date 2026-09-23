@@ -180,8 +180,8 @@ export function App() {
           <p style={S.stats}>
             {dataset.innovations.length} innovations × {dataset.languages.length} languages
             → {scored.subgroups.length} attested, <strong>{shown}</strong> drawn
-            {scene.splitCount > 0 && (
-              <> · <span style={S.warn}>{scene.splitCount} in multiple regions</span></>
+            {scene.routedCount > 0 && (
+              <> · <span style={S.warn}>{scene.routedCount} routed around non-members</span></>
             )}
           </p>
 
