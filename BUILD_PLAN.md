@@ -417,6 +417,41 @@ Live ς/ε threshold slider; drag nodes with contours reflowing; click a contour
 to list its supporting, conflicting and exclusive innovations; per-subgroup
 visibility; layout-mode switch; undo/redo; project save/load.
 
+### Proposed — linkage breaking (the chronology view)
+
+Kalyan & François (2019: 171) give a definition the tool is one small step
+from implementing, and which nothing currently does:
+
+> i. A glottometric diagram is a weighted hypergraph whose nodes are dialects,
+> whose edges are isoglosses, and whose edge weights are the subgroupiness
+> values of these isoglosses.
+> ii. A **language** is a connected component of such a hypergraph.
+> iii. The **chronology** of a language family is found by successively
+> removing the weakest edges and at each stage noting how the dialects are
+> partitioned into connected components.
+
+The threshold slider already removes the weakest isoglosses; it just does not
+report the partition. Adding connected components turns the existing control
+into a chronology: drag the threshold and watch the proto-language break into
+daughters, stopping at each value where the partition actually changes.
+
+Verified as a 20-line union-find over the existing scored subgroups. On the
+demo data it produces a clean sequence — the family holds together until the
+9th-weakest isogloss goes, then fragments through 4, 5, 6, 7, 8, 9, 10, 12, 13
+and finally 15 languages, each step naming the isogloss whose loss caused it.
+K&F report the same behaviour on their real Torres–Banks data (their family
+survives 21 removals and breaks on the 22nd).
+
+**It must ship with the objection attached.** Elgh & Hammarström (2024: 312)
+argue the inference does not hold: the weakness formula "offers no guarantee
+that the weakest isogloss lines are the earliest links to be broken. Rather,
+weaker lines may be indicative of shorter time spans, not of when those time
+spans occurred." They also hold that HG is "simply a data display system, with
+no explicit time dimension". Presenting the sequence as a chronology without
+that caveat would overstate what the method supports — so it belongs in the
+same pattern as the rest of the settings panel: implement the proposal, show
+the dispute.
+
 ### Phase 3 — matrix editor *(5–7 days)*
 
 The other half of the product, and the bigger app surface.
@@ -475,10 +510,15 @@ is shown as such rather than quietly folded into a neighbour.
 #### Fisher's exact test, and an attribution the code refuses to make
 
 Hammarström (2017) is reported to use Fisher's exact test for exactly this
-purpose. His contingency table could not be verified from the sources to hand,
-and **the implementation does not claim to be his** — the table is ours, stated
-explicitly in `src/core/fisher.ts` so it can be checked or replaced. Worth
-raising with the authors along with the NA question.
+purpose. The reference is to a **conference talk with no accessible write-up**.
+Elgh & Hammarström (2024), "The dialect chain tree" — the obvious place to look
+for the method in print — has since been checked and contains no contingency
+table, no Fisher's exact test and no isogloss-strength measure at all; it
+pursues an extension of the tree model instead.
+
+So **the implementation does not claim to be his**: the table is ours, stated
+explicitly in `src/core/fisher.ts` so it can be checked or replaced if the
+original surfaces. Still worth asking the authors directly.
 
 Two things the tests established that the first draft got wrong:
 

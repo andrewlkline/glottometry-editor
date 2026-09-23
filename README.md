@@ -173,7 +173,18 @@ The underlying arguments:
   instead. They also note the opposite risk: ε alone over-represents groups
   built on parallel innovations.
 - **Alternative strength measures.** Hammarström (2017) proposes Fisher's exact
-  test as a statistically rigorous replacement for κ and ς.
+  test as a statistically rigorous replacement for κ and ς. That reference is a
+  conference talk with no accessible write-up; Elgh & Hammarström (2024) has
+  been checked and does not contain it. The implementation here therefore uses
+  its own contingency table and does not claim to be his — see
+  `src/core/fisher.ts`.
+- **Whether any of this dates anything.** Elgh & Hammarström (2024: 312) hold
+  that Historical Glottometry is "simply a data display system, with no
+  explicit time dimension", that "innovation" conflates shared ancestry,
+  horizontal transfer and parallel development, and that K&F's chronology
+  proposal "offers no guarantee that the weakest isogloss lines are the
+  earliest links to be broken". Worth reading before presenting a glottometric
+  diagram as a history rather than a summary of evidence.
 - **Filtering by innovation type.** Datasets are typed (regular sound change,
   irregular sound change, morphological, syntactic, lexical). K&F's own data is
   50% lexical replacement, the most borrowing-prone category. Being able to
@@ -388,6 +399,12 @@ in `literature/` (gitignored) if you want them to hand.
 - Pelkey, Jamin & Siva Kalyan. 2026. Wave Model. In *The Wiley Blackwell
   Companion to Diachronic Linguistics*.
   [doi:10.1002/9781119898023.wbcdl060](https://onlinelibrary.wiley.com/doi/10.1002/9781119898023.wbcdl060)
+- Kalyan, Siva & Alexandre François. 2019. When the waves meet the trees: A
+  response to Jacques & List. *JHL* 9(1): 167–176. **Defines the diagram as a
+  weighted hypergraph and proposes the linkage-breaking chronology** — see
+  BUILD_PLAN.md.
+- Elgh, Erik & Harald Hammarström. 2024. The dialect chain tree. *Diachronica*
+  41(3): 307–329. [doi:10.1075/dia.23014.elg](https://doi.org/10.1075/dia.23014.elg)
 - Daniels, Don, Danielle Barth & Wolfgang Barth. 2019. Subgrouping the Sogeram
   languages: A critical appraisal of Historical Glottometry. *JHL* 9(1): 92–127.
 - Jacques, Guillaume & Johann-Mattis List. 2019. Save the trees. *JHL* 9(1).

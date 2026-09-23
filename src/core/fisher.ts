@@ -6,11 +6,18 @@
  * Hammarström (2017) is reported to use Fisher's exact test for exactly this
  * purpose — Pelkey & Kalyan describe it as "a statistically rigorous measure
  * of the 'strength' of an isogloss, thereby improving upon Kalyan and
- * François's (2018) measures". **This is not a reimplementation of that.** The
- * construction of his contingency table could not be verified from the sources
- * to hand, and putting his name on a guess would be worse than useless in a
- * tool linguists might cite. The table below is ours, stated explicitly so it
- * can be checked or replaced once the original is available. See BUILD_PLAN.md.
+ * François's (2018) measures". **This is not a reimplementation of that.**
+ *
+ * The 2017 reference is to a conference talk with no accessible write-up.
+ * Elgh & Hammarström (2024), "The dialect chain tree", was the obvious place
+ * to look for the method in print; it has been checked and contains no
+ * contingency table, no Fisher's exact test, and no isogloss-strength measure
+ * at all. It pursues a different line entirely — an extension of the tree
+ * model rather than a statistic over isoglosses.
+ *
+ * So the table below is ours, stated explicitly so it can be checked or
+ * replaced if the original construction surfaces. Putting his name on a guess
+ * would be worse than useless in a tool linguists might cite.
  *
  * ## The table
  *
