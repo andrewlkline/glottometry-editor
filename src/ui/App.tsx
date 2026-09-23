@@ -14,9 +14,11 @@ import { Diagram } from '../render/Diagram.js';
 import { downloadSvg } from '../render/exportSvg.js';
 import { EvidencePanel } from './EvidencePanel.js';
 import { SubgroupList } from './SubgroupList.js';
-import type { NaPolicy } from '../core/types.js';
+import { SettingsPanel } from './SettingsPanel.js';
+import {
+  INNOVATION_TYPES, filterByType, typeCounts as countTypes, weightsFor,
+} from '../core/innovationTypes.js';
 
-const POLICIES: NaPolicy[] = ['half', 'zero', 'one', 'rowMean', 'colMean'];
 const LAYOUT_LABELS: Record<LayoutKind, string> = {
   chain: 'chain',
   mds: 'MDS (cohesiveness)',
@@ -51,8 +53,18 @@ export function App() {
   // Cmd/Ctrl+Z and Cmd/Ctrl+Shift+Z (or Ctrl+Y), skipped while typing.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Leave text entry alone, but a checkbox, radio or slider is not
+      // somewhere anyone types, and having focus land on one should not
+      // silently disable undo.
       const target = e.target as HTMLElement | null;
-      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (target) {
+        const tag = target.tagName;
+        const type = (target as HTMLInputElement).type;
+        const typing = tag === 'TEXTAREA'
+          || (tag === 'INPUT'
+            && !['checkbox', 'radio', 'range', 'button', 'submit', 'file'].includes(type));
+        if (typing || target.isContentEditable) return;
+      }
       if (!(e.metaKey || e.ctrlKey)) return;
 
       const key = e.key.toLowerCase();
@@ -89,12 +101,27 @@ export function App() {
   const dataset = project?.dataset ?? null;
   const settings = project?.settings ?? null;
 
-  // Scored once per dataset+policy; independent of threshold, layout and edits.
+  // Scored once per dataset + method settings; independent of threshold,
+  // layout and manual edits, all of which only affect presentation.
   const scored = useMemo(() => {
     if (!dataset || !settings) return null;
-    const g = new Glottometry(dataset, settings.policy);
-    return { g, subgroups: g.subgroups() };
-  }, [dataset, settings?.policy]);
+    const enabled = new Set(settings.enabledTypes ?? INNOVATION_TYPES);
+    // Filtering removes rows, so it can make a subgroup unattested rather than
+    // merely weaker. That is the point of the control.
+    const filtered = filterByType(dataset, enabled);
+    const g = new Glottometry(
+      filtered, settings.policy, weightsFor(filtered, settings.typeWeights),
+    );
+    return { g, dataset: filtered, subgroups: g.subgroups() };
+  }, [dataset, settings?.policy, settings?.enabledTypes, settings?.typeWeights]);
+
+  const strengthOf = useCallback(
+    (s: { sigma: number; epsilon: number; significance: number }) =>
+      settings?.measure === 'epsilon' ? s.epsilon
+        : settings?.measure === 'significance' ? s.significance
+        : s.sigma,
+    [settings?.measure],
+  );
 
   const haveCoords = useMemo(
     () => !!dataset && !!project?.coordinates &&
@@ -139,8 +166,10 @@ export function App() {
 
   const scene = useMemo(() => {
     if (!layout || !scored || !settings) return null;
-    return buildScene(layout, scored.subgroups.filter((s) => s.sigma >= settings.minSigma));
-  }, [layout, scored, settings?.minSigma]);
+    return buildScene(
+      layout, scored.subgroups.filter((s) => strengthOf(s) >= settings.minStrength),
+    );
+  }, [layout, scored, settings?.minStrength, strengthOf]);
 
   const visible = useMemo(
     () => scene?.contours.filter((c) => !hidden.has(c.key)) ?? [],
@@ -200,6 +229,27 @@ export function App() {
     );
   }, [dataset, history]);
 
+  /** Everything that shaped the diagram, recorded in the exported SVG. */
+  const exportSubtitle = useMemo(() => {
+    if (!settings || !scored || !dataset) return '';
+    const measureName = settings.measure === 'significance'
+      ? '−log₁₀p' : settings.measure === 'epsilon' ? 'ε' : 'ς';
+    const parts = [
+      `${visible.length} subgroups with ${measureName} ≥ ${settings.minStrength.toFixed(2)}`,
+      `${LAYOUT_LABELS[settings.layoutKind]} layout`,
+      `NA: ${settings.policy}`,
+    ];
+    if (scored.dataset.innovations.length < dataset.innovations.length) {
+      parts.push(
+        `${scored.dataset.innovations.length}/${dataset.innovations.length} innovations`,
+      );
+    }
+    if (settings.typeWeights && Object.values(settings.typeWeights).some((w) => w !== 1)) {
+      parts.push('type-weighted');
+    }
+    return parts.join(' · ');
+  }, [settings, scored, dataset, visible.length]);
+
   const resetLayout = () =>
     patch({ manualOrder: undefined, manualPositions: undefined }, 'reset layout');
   const edited = !!(project?.manualOrder || project?.manualPositions);
@@ -239,22 +289,6 @@ export function App() {
             ))}
           </select>
         </label>
-        <label>
-          NA{' '}
-          <select
-            value={settings.policy}
-            onChange={(e) => setSettings({ policy: e.target.value as NaPolicy }, 'change NA policy')}
-          >
-            {POLICIES.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-        </label>
-        <label style={S.slider}>
-          ς ≥ {settings.minSigma.toFixed(2)}
-          <input
-            type="range" min={0} max={6} step={0.05} value={settings.minSigma}
-            onChange={(e) => setSettings({ minSigma: Number(e.target.value) }, 'change threshold', 'minSigma')}
-          />
-        </label>
         <span style={S.undoGroup}>
           <button
             onClick={history.undo}
@@ -281,7 +315,7 @@ export function App() {
           disabled={!exportScene}
           onClick={() => exportScene && downloadSvg(exportScene, `${project.name}-glottometry`, {
             title: `Glottometric diagram — ${project.name}`,
-            subtitle: `${visible.length} subgroups with ς ≥ ${settings.minSigma.toFixed(2)} · ${LAYOUT_LABELS[settings.layoutKind]} layout · NA: ${settings.policy}`,
+            subtitle: exportSubtitle,
           })}
         >
           export SVG
@@ -293,7 +327,10 @@ export function App() {
       {scene && scored && (
         <>
           <p style={S.stats}>
-            {dataset.innovations.length} innovations × {dataset.languages.length} languages
+            {scored.dataset.innovations.length}
+            {scored.dataset.innovations.length < dataset.innovations.length &&
+              <span style={S.warn}>/{dataset.innovations.length}</span>} innovations ×{' '}
+            {dataset.languages.length} languages
             → {scored.subgroups.length} attested, <strong>{visible.length}</strong> drawn
             {hidden.size > 0 && <> · {hidden.size} hidden</>}
             {scene.routedCount > 0 && (
@@ -305,13 +342,21 @@ export function App() {
           </p>
 
           <div style={S.workspace}>
-            <SubgroupList
-              contours={scene.contours}
-              selected={selected}
-              hidden={hidden}
-              onSelect={setSelected}
-              onHover={setHighlighted}
-              onToggleHidden={(key) => {
+            <div style={S.leftColumn}>
+              <SettingsPanel
+                settings={settings}
+                typeCounts={countTypes(dataset)}
+                kept={scored.dataset.innovations.length}
+                total={dataset.innovations.length}
+                onChange={setSettings}
+              />
+              <SubgroupList
+                contours={scene.contours}
+                selected={selected}
+                hidden={hidden}
+                onSelect={setSelected}
+                onHover={setHighlighted}
+                onToggleHidden={(key) => {
                 const contour = scene.contours.find((c) => c.key === key);
                 const name = contour?.subgroup.memberNames.join('+') ?? 'subgroup';
                 patch(
@@ -323,17 +368,18 @@ export function App() {
                   `${hidden.has(key) ? 'show' : 'hide'} ${name}`,
                 );
               }}
-              onShowAll={() => patch({ hidden: [] }, 'show all subgroups')}
-            />
+                onShowAll={() => patch({ hidden: [] }, 'show all subgroups')}
+              />
+            </div>
 
             <div style={S.stage}>
               <Diagram
                 scene={scene}
                 highlighted={highlighted}
-                selected={selected}
-                hidden={hidden}
-                onHover={setHighlighted}
-                onSelect={setSelected}
+                  selected={selected}
+                  hidden={hidden}
+                  onHover={setHighlighted}
+                  onSelect={setSelected}
                 onReorder={onReorder}
                 onMove={onMove}
                 onDragEnd={history.seal}
@@ -416,10 +462,11 @@ const S: Record<string, React.CSSProperties> = {
   hint: { color: '#999' },
   workspace: {
     display: 'grid',
-    gridTemplateColumns: 'minmax(180px, 230px) 1fr minmax(240px, 320px)',
+    gridTemplateColumns: 'minmax(210px, 260px) 1fr minmax(240px, 320px)',
     gap: '1rem',
     alignItems: 'start',
   },
+  leftColumn: { display: 'flex', flexDirection: 'column', gap: '0.6rem' },
   stage: { display: 'flex', justifyContent: 'center', overflowX: 'auto' },
   placeholder: {
     border: '1px dashed #ddd', borderRadius: 6, padding: '0.75rem',

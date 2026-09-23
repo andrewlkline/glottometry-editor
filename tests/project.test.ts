@@ -38,7 +38,12 @@ describe('round-trip', () => {
   it('preserves every manual adjustment', () => {
     const before = {
       ...createProject('tuned', dataset),
-      settings: { policy: 'zero' as const, layoutKind: 'mds' as const, minSigma: 2.5 },
+      settings: {
+        policy: 'zero' as const, layoutKind: 'mds' as const,
+        measure: 'epsilon' as const, minStrength: 2.5,
+        enabledTypes: ['ISC' as const, 'Mrp' as const],
+        typeWeights: { Lex: 0.5 },
+      },
       manualOrder: [...dataset.languages].reverse(),
       manualPositions: { 'ⓁA': [12.5, 34] as [number, number] },
       hidden: ['0,1', '2,3'],
@@ -84,6 +89,27 @@ describe('parsing bad input', () => {
     const p = parseProject('{"dataset": {"languages": ["A", "B"], "matrix": [[1, 1]]}}');
     expect(p.settings.policy).toBe('half');
     expect(p.settings.layoutKind).toBe('chain');
+    expect(p.settings.measure).toBe('sigma');
+  });
+
+  it('migrates minSigma from projects written before measures were switchable', () => {
+    const p = parseProject(
+      '{"dataset": {"languages": ["A", "B"], "matrix": [[1, 1]]},'
+      + ' "settings": {"policy": "zero", "minSigma": 2.25}}',
+    );
+    expect(p.settings.minStrength).toBe(2.25);
+    expect(p.settings.measure).toBe('sigma');
+    expect(p.settings.policy).toBe('zero');
+    expect((p.settings as unknown as Record<string, unknown>).minSigma).toBeUndefined();
+  });
+
+  it('prefers a stored minStrength over a legacy minSigma', () => {
+    const p = parseProject(
+      '{"dataset": {"languages": ["A", "B"], "matrix": [[1, 1]]},'
+      + ' "settings": {"minSigma": 9, "minStrength": 3, "measure": "epsilon"}}',
+    );
+    expect(p.settings.minStrength).toBe(3);
+    expect(p.settings.measure).toBe('epsilon');
   });
 
   it('coerces stray cell values to unknown', () => {
@@ -143,7 +169,10 @@ describe('a project carrying a whole workflow', () => {
     // before and after a save/load cycle.
     const original: ReturnType<typeof createProject> = {
       ...createProject('vanuatu', dataset, coordinates),
-      settings: { policy: 'rowMean', layoutKind: 'geographic', minSigma: 1.75 },
+      settings: {
+        policy: 'rowMean', layoutKind: 'geographic',
+        measure: 'significance', minStrength: 1.75,
+      },
       manualPositions: { 'ⓁC': [100, 200], 'ⓁD': [150, 250] },
       hidden: ['4,5'],
     };

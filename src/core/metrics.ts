@@ -22,6 +22,7 @@
 import type {
   Cell, Dataset, EvidenceItem, NaPolicy, Subgroup, SubgroupEvidence,
 } from './types.js';
+import { fisherStrength, type FisherTable } from './fisher.js';
 
 /** Resolve the matrix to participation probabilities under the given policy. */
 export function resolveProbabilities(
@@ -98,25 +99,40 @@ export class Glottometry {
   private readonly p1: Float64Array;
   /** Raw cells, kept so candidate patterns stay independent of the NA policy. */
   private readonly raw: Cell[][];
+  /**
+   * Optional per-innovation multiplier.
+   *
+   * Null in the default case, which is deliberate: K&F count innovations
+   * unweighted, and Pelkey (2015: 402) warns that weighting "too easily
+   * becomes an outlet for comparativists to justify their own intuitions".
+   * Available, off unless asked for.
+   */
+  private readonly weights: Float64Array | null;
 
-  constructor(dataset: Dataset, policy: NaPolicy = 'half') {
+  constructor(dataset: Dataset, policy: NaPolicy = 'half', weights: Float64Array | null = null) {
     this.languages = dataset.languages;
     this.innovations = dataset.innovations;
     this.nLanguages = dataset.languages.length;
     this.nInnovations = dataset.matrix.length;
     this.raw = dataset.matrix;
     this.p1 = resolveProbabilities(dataset.matrix, this.nLanguages, policy);
+    this.weights = weights && weights.length === this.nInnovations ? weights : null;
   }
 
   /** Score one subgroup, given as a boolean mask over language indices. */
-  stats(mask: boolean[]): Pick<Subgroup, 'epsilon' | 'kappa' | 'sigma' | 'p' | 'q'> {
-    const { p1, nLanguages, nInnovations } = this;
+  stats(mask: boolean[]): Pick<
+    Subgroup, 'epsilon' | 'kappa' | 'sigma' | 'p' | 'q' | 'fisher' | 'significance'
+  > {
+    const { p1, nLanguages, nInnovations, weights } = this;
     let eps = 0;
     let p = 0;
     let q = 0;
+    // The 2x2 table for Fisher's exact test; see fisher.ts for what it means.
+    const table: FisherTable = { a: 0, b: 0, c: 0, d: 0 };
 
     for (let r = 0; r < nInnovations; r++) {
       const base = r * nLanguages;
+      const w = weights ? weights[r]! : 1;
       let allIn = 1;      // P(every member participated)
       let noneIn = 1;     // P(no member participated)
       let noneOut = 1;    // P(no outsider participated)
@@ -131,14 +147,23 @@ export class Glottometry {
         }
       }
 
-      eps += allIn * noneOut;
-      p += allIn;
+      eps += w * allIn * noneOut;
+      p += w * allIn;
       // some-but-not-all members, together with at least one outsider
-      q += (1 - allIn - noneIn) * (1 - noneOut);
+      q += w * (1 - allIn - noneIn) * (1 - noneOut);
+
+      table.a += allIn * noneOut;
+      table.b += allIn * (1 - noneOut);
+      table.c += (1 - allIn) * noneOut;
+      table.d += (1 - allIn) * (1 - noneOut);
     }
 
     const kappa = p + q > 0 ? p / (p + q) : 0;
-    return { epsilon: eps, kappa, sigma: eps * kappa, p, q };
+    const fisher = fisherStrength(table);
+    return {
+      epsilon: eps, kappa, sigma: eps * kappa, p, q,
+      fisher, significance: fisher.strength,
+    };
   }
 
   /**

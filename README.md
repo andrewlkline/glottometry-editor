@@ -7,9 +7,9 @@ to family trees developed by Siva Kalyan and Alexandre François.
 exports glottometric diagrams in three layouts — chain, MDS on cohesiveness,
 geographic — with live thresholding, draggable languages, per-contour
 visibility, an evidence inspector showing which innovations produced each
-score, undo/redo, and `.glot.json` project save/load. Still to come: the
-innovation-matrix editor and the contested-settings panel. See
-[BUILD_PLAN.md](BUILD_PLAN.md).
+score, undo/redo, a settings panel for the choices the literature disputes, and
+`.glot.json` project save/load. Still to come: the innovation-matrix editor.
+See [BUILD_PLAN.md](BUILD_PLAN.md).
 
 ## What the method is
 
@@ -147,9 +147,25 @@ is a clean subset of theirs (verified in `tests/maramaBaseline.test.ts`), so
 they generate candidates beyond distinct row patterns — possibly intersections
 of isoglosses — and retain some with ε as low as 0.01. Also unresolved.
 
-### Contested choices a good tool should expose
+### Contested choices — now exposed in the UI
 
-These are live disagreements in the literature, not settled defaults:
+These are live disagreements in the literature, not settled defaults, so the
+settings panel carries each with its argument attached. What they do to the
+demo data:
+
+| control | effect |
+|---|---|
+| ς ≥ 1 vs ε ≥ 2 | 31 subgroups drawn vs 47 |
+| exclude lexical replacement | 473 → 240 innovations, 155 → 99 attested, 31 → 13 drawn |
+| significance (Fisher) | ranks differently from both, below the top subgroup |
+
+The lexical filter is the Jacques & List critique made answerable: more than
+half the displayed structure depends on the category most open to borrowing,
+and three subgroups vanish outright rather than weakening. The exported SVG
+records the filter, weighting and threshold in its subtitle, so a figure cannot
+be separated from the settings that produced it.
+
+The underlying arguments:
 
 - **Display cutoff on ς vs. ε.** Daniels, Barth & Barth (2019) argue a ς
   threshold hides real structure — in their Sogeram data it made the pivotal

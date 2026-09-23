@@ -441,19 +441,58 @@ and impossible to reconstruct later.
 *Done when*: a new dataset can be built from scratch in the app, and a Marama
 CSV round-trips without loss of the columns it carries.
 
-### Phase 4 — the contested settings *(2–3 days)*
-
-- Cutoff on ς **or** ε (Daniels et al. 2019 argue for `ε ≥ 2`)
-- Filter by innovation type, with recompute — directly answers Jacques & List's
-  borrowing critique, since K&F's data is 50% lexical
-- NA policy selector, documented
-- Hammarström's (2017) Fisher's exact test as an alternative strength measure
-- Per-type weighting: **present but off by default**, with Pelkey's warning in
-  the UI that weighting "too easily becomes an outlet for comparativists to
-  justify their own intuitions"
+### Phase 4 — the contested settings — **DONE**
 
 *Done when*: every default the literature argues about can be changed in the UI
-and the diagram updates live.
+and the diagram updates live. — **met**. Each control carries the argument for
+it, so a reader who distrusts the lexical evidence or thinks ς is the wrong
+cutoff can see what their objection does rather than take the author's word.
+
+- **Cutoff on ς, ε or significance.** Switching to ε defaults the threshold to
+  2, per Daniels et al. On the demo data ς ≥ 1 shows 31 subgroups and ε ≥ 2
+  shows 47, which is their point about ς hiding structure, made checkable.
+- **Innovation type filter.** Excluding lexical replacement takes the demo from
+  473 innovations to 240, 155 attested subgroups to 99, and **31 drawn to 13**.
+  More than half the displayed structure rests on the category Jacques & List
+  single out. Three subgroups with ς ≥ 1 disappear entirely rather than merely
+  weakening, because candidates come from distinct innovation patterns.
+- **NA policy**, with each option's meaning stated in the panel.
+- **Per-type weighting**, behind a disclosure, off by default, with Pelkey's
+  warning inline and a badge on the panel whenever it is on.
+
+The exported SVG's subtitle records the filter and weighting alongside the
+threshold, so a figure cannot be separated from the settings that produced it.
+
+#### The type parser
+
+Innovation type is not a field in the interchange format — it lives in the
+label as a prefix. Parsing it reproduces K&F's Table 5-1 exactly once three
+prefixes their own data uses (`Sytx`, `Prg`, `Phr`) are recognised as the
+single "syntactic change" row the published typology has: RSC 21, Syn 10,
+Mrp 91, against their 21, 10, 91. Anything unrecognised becomes `untyped` and
+is shown as such rather than quietly folded into a neighbour.
+
+#### Fisher's exact test, and an attribution the code refuses to make
+
+Hammarström (2017) is reported to use Fisher's exact test for exactly this
+purpose. His contingency table could not be verified from the sources to hand,
+and **the implementation does not claim to be his** — the table is ours, stated
+explicitly in `src/core/fisher.ts` so it can be checked or replaced. Worth
+raising with the authors along with the NA question.
+
+Two things the tests established that the first draft got wrong:
+
+1. It is **not a correction for dataset size**. The initial docstring claimed
+   "2 of 20 is striking, 2 of 500 is not"; the opposite is true of this table,
+   since unrelated innovations enlarge it and make the observed overlap rarer.
+2. It is **not a significance test on κ**. The two can rank subgroups in
+   opposite directions, and do: on a constructed pair with identical ε = 10, κ
+   prefers one (0.75 against 0.52) and the test prefers the other (p < 0.001
+   against p > 0.5). The difference is innovations that reach every member and
+   keep going — κ counts them as support, this table counts them against.
+
+Both were caught by tests written to confirm a story that turned out to be
+false, and both are now pinned so the descriptions cannot drift from the code.
 
 ### Phase 5 — stretch
 

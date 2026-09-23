@@ -191,7 +191,11 @@ describe('SVG export', () => {
   it('escapes markup in labels', () => {
     const nasty = buildScene(
       chainLayout([0, 1], ['<script>', 'A&B']),
-      [{ members: [0, 1], memberNames: ['<script>', 'A&B'], epsilon: 1, kappa: 1, sigma: 1, p: 1, q: 0 }],
+      [{
+        members: [0, 1], memberNames: ['<script>', 'A&B'],
+        epsilon: 1, kappa: 1, sigma: 1, p: 1, q: 0,
+        fisher: { a: 1, b: 0, c: 0, d: 0, pValue: 1, strength: 0 }, significance: 0,
+      }],
     );
     const out = exportSvg(nasty);
     expect(out).not.toContain('<script>');

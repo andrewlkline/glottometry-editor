@@ -12,7 +12,8 @@
  * in a different order.
  */
 
-import type { Cell, Dataset, NaPolicy } from '../core/types.js';
+import type { Cell, Dataset, NaPolicy, StrengthMeasure } from '../core/types.js';
+import type { InnovationType } from '../core/innovationTypes.js';
 import type { LayoutKind } from '../core/layout.js';
 import type { LanguageCoordinates } from './maramaCsv.js';
 
@@ -21,7 +22,14 @@ export const PROJECT_VERSION = 1;
 export interface ProjectSettings {
   policy: NaPolicy;
   layoutKind: LayoutKind;
-  minSigma: number;
+  /** Which measure the display threshold applies to. */
+  measure: StrengthMeasure;
+  /** Threshold on that measure. */
+  minStrength: number;
+  /** Innovation types included in scoring; undefined means all of them. */
+  enabledTypes?: InnovationType[];
+  /** Per-type multipliers. Undefined means unweighted, which is the default. */
+  typeWeights?: Partial<Record<InnovationType, number>>;
 }
 
 export interface Project {
@@ -41,7 +49,8 @@ export interface Project {
 export const DEFAULT_SETTINGS: ProjectSettings = {
   policy: 'half',
   layoutKind: 'chain',
-  minSigma: 1,
+  measure: 'sigma',
+  minStrength: 1,
 };
 
 export function createProject(
@@ -97,7 +106,14 @@ export function parseProject(text: string): Project {
     ? dataset.innovations
     : dataset.matrix.map((_, i) => `innovation ${i + 1}`);
 
-  const settings = (obj.settings ?? {}) as Partial<ProjectSettings>;
+  const stored = (obj.settings ?? {}) as Partial<ProjectSettings> & { minSigma?: number };
+  // Projects written before the measure was configurable stored `minSigma`.
+  const settings: Partial<ProjectSettings> = { ...stored };
+  if (settings.minStrength === undefined && typeof stored.minSigma === 'number') {
+    settings.minStrength = stored.minSigma;
+    settings.measure = 'sigma';
+  }
+  delete (settings as { minSigma?: number }).minSigma;
 
   return {
     version: typeof obj.version === 'number' ? obj.version : PROJECT_VERSION,

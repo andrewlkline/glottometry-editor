@@ -39,7 +39,16 @@ export interface Subgroup {
   p: number;
   /** Conflicting innovations: some-but-not-all members, plus >= 1 outsider. */
   q: number;
+  /** Contingency table and p-value; see core/fisher.ts. */
+  fisher: FisherResult;
+  /** `-log10(p)` from that test, so bigger is stronger. */
+  significance: number;
 }
+
+/** Which measure a display threshold is applied to. */
+export type StrengthMeasure = 'sigma' | 'epsilon' | 'significance';
+
+import type { FisherResult } from './fisher.js';
 
 /** How one innovation bears on one subgroup. */
 export type EvidenceRole =
