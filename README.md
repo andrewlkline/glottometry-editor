@@ -9,7 +9,8 @@ geographic — with live thresholding, draggable languages, per-contour
 visibility, an evidence inspector showing which innovations produced each
 score, undo/redo, a settings panel for the choices the literature disputes, and
 `.glot.json` project save/load, and a fragmentation view implementing K&F's
-linkage-breaking proposal. Still to come: the innovation-matrix editor.
+linkage-breaking proposal, and a matrix editor for building datasets. Every
+phase of [BUILD_PLAN.md](BUILD_PLAN.md) is now built.
 See [BUILD_PLAN.md](BUILD_PLAN.md).
 
 ## What the method is
@@ -262,6 +263,23 @@ dispatches `seal`, which closes the entry explicitly — the window is a fallbac
 for edits with no natural end. Discrete actions carry no key and never merge;
 opening a file resets history rather than recording an edit.
 
+### The matrix editor
+
+A `data` mode beside the diagram: a windowed grid of innovations × languages
+with click-to-cycle cells, filtering by text and type, and a detail pane for
+the reasoning behind each row — proto-form, innovated form, gloss, reflexes,
+notes, sources and relative-chronology links.
+
+Metadata rides **alongside** the dataset rather than inside it. `core/` is held
+at parity with the Python reference and scores a plain matrix; `Project`
+carries a parallel `innovationMeta` array that `data/edit.ts` keeps aligned. A
+note can never affect a score, and the CSV round-trip is untouched.
+
+The edit operations are a module of their own because they cascade: a language
+is referenced from the matrix columns, the coordinates, the manual order, the
+manual positions **and** every innovation's reflexes, so renaming or deleting
+one has to reach all five.
+
 ### The fragmentation view
 
 Kalyan & François (2019: 171) define a glottometric diagram as a weighted
@@ -390,8 +408,10 @@ contour-engine design, phasing and risks.
       `.glot.json` project save/load.
 - [x] Undo/redo (`⌘Z` / `⌘⇧Z`), coalescing each drag or slider sweep into a
       single entry.
-- [ ] Innovation-matrix editor and the contested-settings panel (ε vs ς cutoff,
-      type filters, Fisher's exact).
+- [x] Innovation-matrix editor with per-row reasoning and relative chronology.
+- [x] Contested-settings panel (ε vs ς cutoff, type filters, Fisher's exact).
+- [ ] CLDF export — the field's interchange standard, and the natural home for
+      anything richer than this tool's free-text reflexes.
 - [ ] NA-handling scheme still does not match the official engine. Settled
       policy: document ours, match rankings. Resolving it properly means asking
       the authors.

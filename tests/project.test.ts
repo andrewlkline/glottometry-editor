@@ -15,6 +15,7 @@ import {
   createProject, parseProject, resolveOrder, serializeProject, PROJECT_VERSION,
 } from '../src/data/project.js';
 import { parseCoordinatesCsv, parseMaramaCsv } from '../src/data/maramaCsv.js';
+import { reconcile } from '../src/data/innovationMeta.js';
 import type { Dataset } from '../src/core/types.js';
 
 const read = (p: string) =>
@@ -53,6 +54,37 @@ describe('round-trip', () => {
     expect(after.manualOrder).toEqual(before.manualOrder);
     expect(after.manualPositions).toEqual(before.manualPositions);
     expect(after.hidden).toEqual(before.hidden);
+  });
+
+  it('preserves the reasoning behind each innovation', () => {
+    const before = createProject('meta', dataset);
+    before.innovationMeta = reconcile(undefined, dataset.innovations.length);
+    before.innovationMeta[0] = {
+      ...before.innovationMeta[0]!,
+      type: 'ISC',
+      protoForm: '*malate',
+      innovatedForm: '*malete',
+      gloss: "'broken'",
+      notes: 'Araki /n̼alare/ points to the form with /a/.',
+      sources: ['François 2002: 270'],
+      reflexes: { 'ⓁA': 'mɪjɪt', 'ⓁB': 'məlit' },
+      precedes: [before.innovationMeta[1]!.id],
+    };
+
+    const after = parseProject(serializeProject(before));
+    expect(after.innovationMeta).toHaveLength(dataset.innovations.length);
+    expect(after.innovationMeta![0]).toEqual(before.innovationMeta[0]);
+  });
+
+  it('repairs a metadata array that does not match the row count', () => {
+    // Hand-edited or written by another tool: pad rather than refuse to open.
+    const p = parseProject(
+      '{"dataset": {"languages": ["A", "B"], "innovations": ["x", "y", "z"],'
+      + ' "matrix": [[1,0],[0,1],[1,1]]}, "innovationMeta": [{"id": "keep"}]}',
+    );
+    expect(p.innovationMeta).toHaveLength(3);
+    expect(p.innovationMeta![0]!.id).toBe('keep');
+    expect(p.innovationMeta![2]!.id).toBeTruthy();
   });
 
   it('keeps unknown cells distinct from zeros', () => {

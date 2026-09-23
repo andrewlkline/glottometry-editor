@@ -126,7 +126,8 @@ const S: Record<string, React.CSSProperties> = {
   note: { color: '#777', fontSize: '0.7rem', margin: '0.3rem 0 0.5rem', lineHeight: 1.45 },
   list: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '0.2rem' },
   stage: {
-    width: '100%', textAlign: 'left', border: '1px solid transparent',
+    width: '100%', textAlign: 'left',
+    borderWidth: 1, borderStyle: 'solid', borderColor: 'transparent',
     borderRadius: 4, background: '#fafafa', cursor: 'pointer',
     padding: '0.3rem 0.35rem', display: 'flex', flexDirection: 'column', gap: '0.15rem',
     font: 'inherit',

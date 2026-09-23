@@ -16,6 +16,7 @@ import type { Cell, Dataset, NaPolicy, StrengthMeasure } from '../core/types.js'
 import type { InnovationType } from '../core/innovationTypes.js';
 import type { LayoutKind } from '../core/layout.js';
 import type { LanguageCoordinates } from './maramaCsv.js';
+import { reconcile, type InnovationMeta } from './innovationMeta.js';
 
 export const PROJECT_VERSION = 1;
 
@@ -38,6 +39,14 @@ export interface Project {
   dataset: Dataset;
   coordinates?: LanguageCoordinates;
   settings: ProjectSettings;
+  /**
+   * Per-innovation reasoning, parallel to `dataset.innovations`.
+   *
+   * Kept alongside rather than inside the dataset so that `core/` continues to
+   * score a plain matrix — see innovationMeta.ts. The edit operations in
+   * edit.ts keep the two aligned; `reconcile` repairs a file where they are not.
+   */
+  innovationMeta?: InnovationMeta[];
   /** Chain layout: the language order the user settled on, by label. */
   manualOrder?: string[];
   /** 2-D layouts: positions the user dragged nodes to, by label. */
@@ -127,6 +136,9 @@ export function parseProject(text: string): Project {
     },
     coordinates: obj.coordinates as LanguageCoordinates | undefined,
     settings: { ...DEFAULT_SETTINGS, ...settings },
+    innovationMeta: reconcile(
+      obj.innovationMeta as InnovationMeta[] | undefined, innovations.length,
+    ),
     manualOrder: Array.isArray(obj.manualOrder) ? (obj.manualOrder as string[]) : undefined,
     manualPositions: (obj.manualPositions ?? undefined) as Project['manualPositions'],
     hidden: Array.isArray(obj.hidden) ? (obj.hidden as string[]) : undefined,

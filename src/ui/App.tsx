@@ -16,6 +16,13 @@ import { EvidencePanel } from './EvidencePanel.js';
 import { SubgroupList } from './SubgroupList.js';
 import { SettingsPanel } from './SettingsPanel.js';
 import { ChronologyPanel, tint } from './ChronologyPanel.js';
+import { MatrixEditor } from './MatrixEditor.js';
+import { InnovationDetail } from './InnovationDetail.js';
+import {
+  addInnovation, addLanguage, cycleCell, removeInnovation, removeLanguage,
+  renameInnovation, renameLanguage, setRow, updateMeta,
+} from '../data/edit.js';
+import { reconcile } from '../data/innovationMeta.js';
 import { linkageStages, stageAt } from '../core/chronology.js';
 import {
   INNOVATION_TYPES, filterByType, typeCounts as countTypes, weightsFor,
@@ -191,6 +198,8 @@ export function App() {
   );
 
   const [showFragmentation, setShowFragmentation] = useState(false);
+  const [mode, setMode] = useState<'diagram' | 'data'>('diagram');
+  const [editingRow, setEditingRow] = useState<number | null>(null);
 
   const nodeFill = useMemo(() => {
     if (!showFragmentation || !stage) return undefined;
@@ -279,6 +288,17 @@ export function App() {
     return parts.join(' · ');
   }, [settings, scored, dataset, visible.length, showFragmentation, stage]);
 
+  const meta = useMemo(
+    () => reconcile(project?.innovationMeta, dataset?.innovations.length ?? 0),
+    [project?.innovationMeta, dataset?.innovations.length],
+  );
+
+  const edit = useCallback(
+    (fn: (p: Project) => Project, label: string, key?: string) =>
+      history.set((p) => (p ? fn(p) : p), label, key),
+    [history],
+  );
+
   const resetLayout = () =>
     patch({ manualOrder: undefined, manualPositions: undefined }, 'reset layout');
   const edited = !!(project?.manualOrder || project?.manualPositions);
@@ -337,6 +357,17 @@ export function App() {
             <span style={S.undoLabel}>{history.undoLabel}</span>
           )}
         </span>
+        <span style={S.modes}>
+          {(['diagram', 'data'] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              style={{ ...S.mode, ...(mode === m ? S.modeActive : {}) }}
+            >
+              {m}
+            </button>
+          ))}
+        </span>
         <label style={S.toggle} title="Show the diagram's connected components">
           <input
             type="checkbox"
@@ -383,6 +414,61 @@ export function App() {
             </span>
           </p>
 
+          {mode === 'data' ? (
+            <div style={S.dataWorkspace}>
+              <MatrixEditor
+                dataset={dataset}
+                meta={meta}
+                selected={editingRow}
+                onSelect={setEditingRow}
+                onCycleCell={(row, column) => edit(
+                  (p) => cycleCell(p, row, column),
+                  `edit ${dataset.innovations[row] ?? 'row'}`,
+                  `cell:${row}`,
+                )}
+                onSetRow={(row, values) => edit(
+                  (p) => setRow(p, row, values),
+                  `fill ${dataset.innovations[row] ?? 'row'}`,
+                )}
+                onAddInnovation={() => {
+                  edit((p) => addInnovation(p), 'add innovation');
+                  setEditingRow(dataset.innovations.length);
+                }}
+                onRemoveInnovation={(row) => {
+                  edit((p) => removeInnovation(p, row), 'delete innovation');
+                  setEditingRow(null);
+                }}
+                onAddLanguage={() => edit((p) => addLanguage(p), 'add language')}
+                onRenameLanguage={(column, label) => edit(
+                  (p) => renameLanguage(p, column, label), 'rename language',
+                )}
+                onRemoveLanguage={(column) => edit(
+                  (p) => removeLanguage(p, column), 'delete language',
+                )}
+              />
+              {editingRow !== null && editingRow < dataset.innovations.length ? (
+                <InnovationDetail
+                  dataset={dataset}
+                  meta={meta}
+                  row={editingRow}
+                  onRename={(label) => edit(
+                    (p) => renameInnovation(p, editingRow, label),
+                    'rename innovation', `label:${editingRow}`,
+                  )}
+                  onUpdate={(changes) => edit(
+                    (p) => updateMeta(p, editingRow, changes),
+                    'edit innovation', `meta:${editingRow}`,
+                  )}
+                  onClose={() => setEditingRow(null)}
+                />
+              ) : (
+                <aside style={S.placeholder}>
+                  Click an innovation to record the reasoning behind it — proto-form,
+                  reflexes, sources, and what it must have preceded.
+                </aside>
+              )}
+            </div>
+          ) : (
           <div style={S.workspace}>
             <div style={S.leftColumn}>
               <SettingsPanel
@@ -451,6 +537,7 @@ export function App() {
               </aside>
             )}
           </div>
+          )}
         </>
       )}
     </main>
@@ -520,6 +607,16 @@ const S: Record<string, React.CSSProperties> = {
     alignItems: 'start',
   },
   leftColumn: { display: 'flex', flexDirection: 'column', gap: '0.6rem' },
+  dataWorkspace: {
+    display: 'grid', gridTemplateColumns: '1fr minmax(260px, 340px)',
+    gap: '1rem', alignItems: 'start',
+  },
+  modes: { display: 'flex', border: '1px solid #ccc', borderRadius: 4, overflow: 'hidden' },
+  mode: {
+    border: 'none', background: '#fafafa', cursor: 'pointer',
+    padding: '0.2rem 0.6rem', fontSize: '0.78rem',
+  },
+  modeActive: { background: '#333', color: '#fff' },
   stage: { display: 'flex', justifyContent: 'center', overflowX: 'auto' },
   placeholder: {
     border: '1px dashed #ddd', borderRadius: 6, padding: '0.75rem',

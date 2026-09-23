@@ -465,29 +465,47 @@ that caveat would overstate what the method supports — so it belongs in the
 same pattern as the rest of the settings panel: implement the proposal, show
 the dispute.
 
-### Phase 3 — matrix editor *(5–7 days)*
-
-The other half of the product, and the bigger app surface.
-
-```ts
-Innovation {
-  id; label; type: 'RSC'|'ISC'|'Mrp'|'Syn'|'Lex';
-  protoForm?; innovatedForm?; gloss?;
-  reflexes: Record<LangId, { value: 1|0|null; form?; note? }>;
-  sources: string[]; notes?;
-  precedes: InnovationId[];      // relative chronology
-}
-Language { id; name; abbrev; glottocode?; lat?; lon?; speakers? }
-```
-
-Virtualised grid (innovations × languages), click to cycle 1/0/?, detail pane
-for the selected row, filter and sort by type, IPA-friendly input. Relative
-chronology gets *stored* even though no published method consumes it yet — K&F
-recorded orderings and never used them, and it's cheap to capture at entry time
-and impossible to reconstruct later.
+### Phase 3 — matrix editor — **DONE**
 
 *Done when*: a new dataset can be built from scratch in the app, and a Marama
-CSV round-trips without loss of the columns it carries.
+CSV round-trips without loss of the columns it carries. — **met**.
+
+A `diagram` / `data` mode switch; a windowed grid of innovations × languages
+with click-to-cycle cells (1 → 0 → unknown, the order a coder works in); filter
+by text and by type; add and remove innovations and languages; and a detail
+pane for the reasoning behind a row — proto-form, innovated form, gloss,
+per-language reflexes, notes, sources, and relative-chronology links.
+
+#### Metadata lives alongside the dataset, not inside it
+
+`core/` is held at parity with the Python reference and scores a plain matrix.
+Putting proto-forms and notes into `Dataset` would have dragged all of that
+through the scorer and the fixtures for no benefit. Instead `Project` carries a
+parallel `innovationMeta` array that the edit operations keep aligned by
+construction, with `reconcile` to repair a file where they disagree. Scoring
+cannot be affected by a note, and the CSV round-trip is untouched.
+
+#### Edits cascade, which is where the bugs would be
+
+A language is referenced from five places: the matrix columns, the coordinates,
+the manual order, the manual positions, and every innovation's reflexes.
+Renaming or deleting one has to reach all five. That is why the operations are
+a module of their own rather than inline handlers — doing it at the call site
+guarantees some caller eventually forgets the reflexes and leaves keys pointing
+at a language that no longer exists. Each cascade has its own test.
+
+#### Relative chronology is stored, not used
+
+K&F recorded orderings between innovations and never consumed them; only 92 of
+their 474 rows participate in any. Links reference innovation **ids**, not
+labels or row positions, so they survive renaming and reordering, and deleting
+an innovation strips links to it. Captured because it is cheap while the
+evidence is in front of you and impossible to reconstruct later.
+
+#### Cell edits coalesce per row
+
+A sweep across a row is one undo, using the same coalesce key mechanism as
+dragging. Verified in the browser: five cell clicks, one undo.
 
 ### Phase 4 — the contested settings — **DONE**
 
