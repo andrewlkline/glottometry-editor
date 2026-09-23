@@ -8,7 +8,8 @@ exports glottometric diagrams in three layouts — chain, MDS on cohesiveness,
 geographic — with live thresholding, draggable languages, per-contour
 visibility, an evidence inspector showing which innovations produced each
 score, undo/redo, a settings panel for the choices the literature disputes, and
-`.glot.json` project save/load. Still to come: the innovation-matrix editor.
+`.glot.json` project save/load, and a fragmentation view implementing K&F's
+linkage-breaking proposal. Still to come: the innovation-matrix editor.
 See [BUILD_PLAN.md](BUILD_PLAN.md).
 
 ## What the method is
@@ -260,6 +261,23 @@ stops a much later return to the same node from extending it. Pointer-up
 dispatches `seal`, which closes the entry explicitly — the window is a fallback
 for edits with no natural end. Discrete actions carry no key and never merge;
 opening a file resets history rather than recording an edit.
+
+### The fragmentation view
+
+Kalyan & François (2019: 171) define a glottometric diagram as a weighted
+hypergraph in which **a language is a connected component**, and derive a
+sequence of splits by successively removing the weakest isoglosses. The
+threshold slider already removed them, so the view just reports the partition:
+15 stages on the demo data, each naming the isogloss whose loss caused the
+break, with nodes tinted by component.
+
+It ships with the objection attached. Elgh & Hammarström (2024: 312) hold that
+the weakness formula "offers no guarantee that the weakest isogloss lines are
+the earliest links to be broken", and that Historical Glottometry is "simply a
+data display system, with no explicit time dimension". The panel quotes them,
+and the feature is called *fragmentation* rather than *chronology* throughout —
+the order the evidence thins out in is a fact, that it is the order events
+happened in is not.
 
 ### Layouts
 

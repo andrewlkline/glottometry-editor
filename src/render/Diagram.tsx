@@ -21,6 +21,14 @@ export interface DiagramProps {
    * the coalescing time window to guess.
    */
   onDragEnd?: () => void;
+  /**
+   * Fill for a language's node, overriding the flat default.
+   *
+   * Used to tint by connected component in the fragmentation view, which makes
+   * the current partition legible on the diagram itself rather than only in a
+   * side panel.
+   */
+  nodeFill?: (language: number) => string | undefined;
 }
 
 /**
@@ -37,6 +45,7 @@ export interface DiagramProps {
  */
 export function Diagram({
   scene, highlighted, selected, hidden, onHover, onSelect, onReorder, onMove, onDragEnd,
+  nodeFill,
 }: DiagramProps) {
   const { layout, contours, width, height } = scene;
   const svgRef = useRef<SVGSVGElement>(null);
@@ -154,7 +163,7 @@ export function Diagram({
               cx={n.x}
               cy={n.y}
               r={layout.nodeRadius}
-              fill={NODE_FILL}
+              fill={nodeFill?.(n.language) ?? NODE_FILL}
               stroke={dragging === n.language ? '#06c' : NODE_STROKE}
               strokeWidth={dragging === n.language ? 2 : 1.2}
             />

@@ -15,6 +15,8 @@ import { downloadSvg } from '../render/exportSvg.js';
 import { EvidencePanel } from './EvidencePanel.js';
 import { SubgroupList } from './SubgroupList.js';
 import { SettingsPanel } from './SettingsPanel.js';
+import { ChronologyPanel, tint } from './ChronologyPanel.js';
+import { linkageStages, stageAt } from '../core/chronology.js';
 import {
   INNOVATION_TYPES, filterByType, typeCounts as countTypes, weightsFor,
 } from '../core/innovationTypes.js';
@@ -171,6 +173,30 @@ export function App() {
     );
   }, [layout, scored, settings?.minStrength, strengthOf]);
 
+  /**
+   * Fragmentation stages over the full scored set, not the displayed subset.
+   *
+   * The threshold is the position *in* the sequence (K&F 2019: 171), so the
+   * sequence itself has to be computed independently of it — otherwise moving
+   * the slider would redefine the thing it is supposed to move through.
+   */
+  const stages = useMemo(() => {
+    if (!scored || !dataset || !settings) return [];
+    return linkageStages(scored.subgroups, dataset.languages.length, strengthOf);
+  }, [scored, dataset, settings, strengthOf]);
+
+  const stage = useMemo(
+    () => (settings ? stageAt(stages, settings.minStrength) : null),
+    [stages, settings?.minStrength],
+  );
+
+  const [showFragmentation, setShowFragmentation] = useState(false);
+
+  const nodeFill = useMemo(() => {
+    if (!showFragmentation || !stage) return undefined;
+    return (language: number) => tint(stage.componentOf[language] ?? 0);
+  }, [showFragmentation, stage]);
+
   const visible = useMemo(
     () => scene?.contours.filter((c) => !hidden.has(c.key)) ?? [],
     [scene, hidden],
@@ -247,8 +273,11 @@ export function App() {
     if (settings.typeWeights && Object.values(settings.typeWeights).some((w) => w !== 1)) {
       parts.push('type-weighted');
     }
+    if (showFragmentation && stage) {
+      parts.push(`${stage.components.length} connected components`);
+    }
     return parts.join(' · ');
-  }, [settings, scored, dataset, visible.length]);
+  }, [settings, scored, dataset, visible.length, showFragmentation, stage]);
 
   const resetLayout = () =>
     patch({ manualOrder: undefined, manualPositions: undefined }, 'reset layout');
@@ -308,6 +337,14 @@ export function App() {
             <span style={S.undoLabel}>{history.undoLabel}</span>
           )}
         </span>
+        <label style={S.toggle} title="Show the diagram's connected components">
+          <input
+            type="checkbox"
+            checked={showFragmentation}
+            onChange={(e) => setShowFragmentation(e.target.checked)}
+          />
+          fragmentation
+        </label>
         {edited && <button onClick={resetLayout} title="Discard manual positions">reset layout</button>}
         <span style={S.spacer} />
         <button onClick={() => downloadProject(project)}>save project</button>
@@ -316,6 +353,7 @@ export function App() {
           onClick={() => exportScene && downloadSvg(exportScene, `${project.name}-glottometry`, {
             title: `Glottometric diagram — ${project.name}`,
             subtitle: exportSubtitle,
+            nodeFill,
           })}
         >
           export SVG
@@ -335,6 +373,10 @@ export function App() {
             {hidden.size > 0 && <> · {hidden.size} hidden</>}
             {scene.routedCount > 0 && (
               <> · <span style={S.warn}>{scene.routedCount} routed around non-members</span></>
+            )}
+            {showFragmentation && stage && (
+              <> · <strong>{stage.components.length}</strong>{' '}
+                {stage.components.length === 1 ? 'language' : 'languages'}</>
             )}
             {' '}· <span style={S.hint}>
               drag a language to {settings.layoutKind === 'chain' ? 'reorder' : 'move'} it
@@ -383,10 +425,20 @@ export function App() {
                 onReorder={onReorder}
                 onMove={onMove}
                 onDragEnd={history.seal}
+                nodeFill={nodeFill}
               />
             </div>
 
-            {selectedSubgroup && scored ? (
+            {showFragmentation && !selectedSubgroup ? (
+              <ChronologyPanel
+                stages={stages}
+                current={stage}
+                languages={dataset.languages}
+                measure={settings.measure}
+                onGoTo={(threshold) =>
+                  setSettings({ minStrength: threshold }, 'go to fragmentation stage')}
+              />
+            ) : selectedSubgroup && scored ? (
               <EvidencePanel
                 glottometry={scored.g}
                 dataset={dataset}
@@ -451,6 +503,7 @@ const S: Record<string, React.CSSProperties> = {
   },
   slider: { display: 'flex', gap: '0.4rem', alignItems: 'center' },
   spacer: { flex: 1 },
+  toggle: { display: 'flex', gap: '0.3rem', alignItems: 'center' },
   undoGroup: { display: 'flex', gap: '0.3rem', alignItems: 'center' },
   undoLabel: {
     color: '#999', fontSize: '0.72rem', maxWidth: 150,

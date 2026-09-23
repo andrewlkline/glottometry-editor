@@ -417,7 +417,7 @@ Live ς/ε threshold slider; drag nodes with contours reflowing; click a contour
 to list its supporting, conflicting and exclusive innovations; per-subgroup
 visibility; layout-mode switch; undo/redo; project save/load.
 
-### Proposed — linkage breaking (the chronology view)
+### Linkage breaking — **DONE**
 
 Kalyan & François (2019: 171) give a definition the tool is one small step
 from implementing, and which nothing currently does:
@@ -435,12 +435,25 @@ report the partition. Adding connected components turns the existing control
 into a chronology: drag the threshold and watch the proto-language break into
 daughters, stopping at each value where the partition actually changes.
 
-Verified as a 20-line union-find over the existing scored subgroups. On the
-demo data it produces a clean sequence — the family holds together until the
-9th-weakest isogloss goes, then fragments through 4, 5, 6, 7, 8, 9, 10, 12, 13
-and finally 15 languages, each step naming the isogloss whose loss caused it.
-K&F report the same behaviour on their real Torres–Banks data (their family
-survives 21 removals and breaks on the 22nd).
+Built as `core/chronology.ts` plus a panel. On the demo data it finds **15
+stages**, each naming the isogloss whose loss caused the break; clicking one
+sets the threshold, and nodes tint by component so the partition is legible on
+the diagram itself rather than only in the panel. K&F report the same behaviour
+on their real Torres–Banks data, where the family survives 21 removals and
+breaks on the 22nd.
+
+#### Intervals, which is where the bugs were
+
+A partition is constant on a half-open interval `(previous, threshold]` —
+raising the threshold *past* an isogloss's weight is what drops it. Two
+mistakes followed from getting that wrong, and both were caught by tests:
+
+- Keying a stage by the *first* threshold of its run rather than the last, so
+  `stageAt` returned the partition from one interval earlier. Subtly wrong
+  rather than obviously — the sequence still looked plausible.
+- Sweeping only up to the largest weight, so the strongest isogloss survived
+  every threshold and the family never finished fragmenting. The sweep needs
+  one step past the maximum.
 
 **It must ship with the objection attached.** Elgh & Hammarström (2024: 312)
 argue the inference does not hold: the weakness formula "offers no guarantee

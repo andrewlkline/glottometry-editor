@@ -21,11 +21,13 @@ export interface ExportOptions {
   title?: string;
   /** Adds a small caption recording the display threshold. */
   subtitle?: string;
+  /** Per-language node fill, matching what the screen shows. */
+  nodeFill?: (language: number) => string | undefined;
 }
 
 export function exportSvg(scene: Scene, opts: ExportOptions = {}): string {
   const { layout, contours, width, height } = scene;
-  const { title = 'Glottometric diagram', subtitle } = opts;
+  const { title = 'Glottometric diagram', subtitle, nodeFill } = opts;
 
   const captionHeight = subtitle ? 26 : 0;
   const totalHeight = height + captionHeight;
@@ -64,7 +66,8 @@ export function exportSvg(scene: Scene, opts: ExportOptions = {}): string {
     lines.push(`    <g data-language="${esc(n.label)}">`);
     lines.push(
       `      <circle cx="${n.x}" cy="${n.y}" r="${layout.nodeRadius}" ` +
-        `fill="${NODE_FILL}" stroke="${NODE_STROKE}" stroke-width="1.2"/>`,
+        `fill="${nodeFill?.(n.language) ?? NODE_FILL}" ` +
+        `stroke="${NODE_STROKE}" stroke-width="1.2"/>`,
     );
     lines.push(
       `      <text x="${n.x}" y="${n.y}" text-anchor="middle" ` +
