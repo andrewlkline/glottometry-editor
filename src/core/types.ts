@@ -40,3 +40,34 @@ export interface Subgroup {
   /** Conflicting innovations: some-but-not-all members, plus >= 1 outsider. */
   q: number;
 }
+
+/** How one innovation bears on one subgroup. */
+export type EvidenceRole =
+  | 'exclusive'     // affects exactly these languages and no others
+  | 'supporting'    // affects all of them, possibly others too
+  | 'conflicting';  // affects some but not all, plus at least one outsider
+
+export interface EvidenceItem {
+  /** Row index into Dataset.innovations. */
+  index: number;
+  label: string;
+  role: EvidenceRole;
+  /**
+   * How strongly this innovation plays the role, in [0, 1].
+   *
+   * 1 when every relevant cell is known. Unknown cells make it fractional,
+   * for the same reason they make epsilon fractional: the counts are
+   * expectations under the NA policy, not certainties.
+   */
+  weight: number;
+  /** Language indices with a definite 1. */
+  participants: number[];
+  /** Language indices whose cell is unknown. */
+  unknown: number[];
+}
+
+export interface SubgroupEvidence {
+  exclusive: EvidenceItem[];
+  supporting: EvidenceItem[];
+  conflicting: EvidenceItem[];
+}

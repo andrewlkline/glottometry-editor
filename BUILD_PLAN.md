@@ -349,15 +349,51 @@ cut out. `tests/helpers.ts` adds a self-intersection check (proper crossings
 plus collinear overlap, which is how a zero-width corridor shows up) and an
 enclosed-area check. With those, all six routing mutations are caught.
 
-### Phase 2 — make it an editor *(3–4 days)*
+### Phase 2 — make it an editor — **mostly done**
+
+*Done when*: a diagram can be taken from raw CSV to publication-ready without
+opening a vector editor. — **met**, apart from undo/redo.
+
+- **Evidence inspector.** Click a contour, or a row in the subgroup list, and
+  see the innovations that produced its score, split into exclusive (totalling
+  ε), supporting (p) and conflicting (q), each with the distribution that makes
+  it interpretable. This is the "why is this a subgroup?" question, and nothing
+  else answers it: the Marama engine returns totals, and the published tables
+  stop at ε/κ/ς, leaving the reader to go back to the spreadsheet.
+- **Subgroup list** with per-contour visibility. Thresholding alone is blunt —
+  it can only remove subgroups in order of strength, so quietening one busy
+  contour means losing everything weaker than it. Hidden contours are genuinely
+  absent from the SVG, not dimmed.
+- **Dragging**, which means different things per layout and is implemented that
+  way. In a chain the node column *is* the ordering, so dragging reorders and
+  the contours stay rounded rectangles; in 2-D a node simply moves and the
+  routed contours reflow. Rearranging updates the routed count live, so the
+  diagram tells you what your arrangement costs — moving ⓁK out of place on the
+  demo data takes it from 3 routed to 6.
+- **Project save/load** (`.glot.json`): dataset, coordinates, settings and every
+  manual adjustment in one file.
+
+#### Manual positions are keyed by label
+
+Not by column index. A project saved against one export of a dataset should
+still apply after a column is inserted or the file is regenerated in a
+different order. `resolveOrder` drops labels the dataset no longer has and
+appends languages the saved order did not mention, so an edited dataset
+degrades to a partial match instead of silently scrambling or throwing the
+arrangement away.
+
+#### Still open
+
+- **Undo/redo.** The only Phase 2 item not built. `reset layout` covers the
+  common case (discard manual positions), but a general history stack would be
+  better, and is the natural next increment since all edits already flow
+  through a single `patch` on one project object.
+
+### Phase 2 — original scope *(for reference)*
 
 Live ς/ε threshold slider; drag nodes with contours reflowing; click a contour
 to list its supporting, conflicting and exclusive innovations; per-subgroup
 visibility; layout-mode switch; undo/redo; project save/load.
-
-*Done when*: a diagram can be taken from raw CSV to publication-ready without
-opening a vector editor. This is the core value proposition — treat it as the
-v1.0 line.
 
 ### Phase 3 — matrix editor *(5–7 days)*
 

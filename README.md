@@ -3,11 +3,12 @@
 A GUI tool for building **glottometric diagrams**: the wave-model alternative
 to family trees developed by Siva Kalyan and Alexandre François.
 
-**Status: Phase 1 complete, including 2-D layouts.** It computes, renders and
+**Status: Phases 1 and 2 done** (bar undo/redo). It computes, renders and
 exports glottometric diagrams in three layouts — chain, MDS on cohesiveness,
-and geographic — with live thresholding and hover-to-isolate. Still to come:
-the innovation-matrix editor and the contested-settings panel. See
-[BUILD_PLAN.md](BUILD_PLAN.md).
+geographic — with live thresholding, draggable languages, per-contour
+visibility, an evidence inspector showing which innovations produced each
+score, and `.glot.json` project save/load. Still to come: the innovation-matrix
+editor and the contested-settings panel. See [BUILD_PLAN.md](BUILD_PLAN.md).
 
 ## What the method is
 
@@ -209,6 +210,18 @@ tools/           fixture generation
 tests/           parity, invariants, CSV, Marama baseline, geometry, scene, planar
 ```
 
+### The evidence inspector
+
+Click a contour and the panel lists the innovations behind its score, split
+three ways: **exclusive** (their weights sum to ε), **supporting** (to p) and
+**conflicting** (to q), each shown with its distribution across the family.
+`tests/evidence.test.ts` asserts those sums match the metrics to 1e-9 under
+every NA policy — otherwise the panel would be explaining a number the diagram
+is not drawing.
+
+This is the question a comparativist actually has, and no existing tool answers
+it. The Marama engine returns totals; the published tables stop at ε, κ and ς.
+
 ### Layouts
 
 | layout | positions from | contours |
@@ -316,7 +329,13 @@ contour-engine design, phasing and risks.
       them.
 - [x] Routed contours in the chain layout too, so every subgroup is one
       connected shape whichever layout is in use.
-- [ ] Phase 2: matrix editor, contested-settings panel, project save/load.
+- [x] Evidence inspector, subgroup visibility, draggable languages,
+      `.glot.json` project save/load.
+- [ ] Undo/redo. `reset layout` covers the common case; a general history stack
+      is the natural next increment, since every edit already flows through one
+      `patch` on a single project object.
+- [ ] Innovation-matrix editor and the contested-settings panel (ε vs ς cutoff,
+      type filters, Fisher's exact).
 - [ ] NA-handling scheme still does not match the official engine. Settled
       policy: document ours, match rankings. Resolving it properly means asking
       the authors.

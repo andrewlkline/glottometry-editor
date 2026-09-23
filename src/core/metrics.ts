@@ -19,7 +19,9 @@
  * with prototype/glottometry.py to 1e-9. See tests/parity.test.ts.
  */
 
-import type { Cell, Dataset, NaPolicy, Subgroup } from './types.js';
+import type {
+  Cell, Dataset, EvidenceItem, NaPolicy, Subgroup, SubgroupEvidence,
+} from './types.js';
 
 /** Resolve the matrix to participation probabilities under the given policy. */
 export function resolveProbabilities(
@@ -140,6 +142,32 @@ export class Glottometry {
   }
 
   /**
+   * The three probabilities the metrics are built from, for one innovation.
+   *
+   * Shared with `evidenceFor` so the inspector cannot drift from the scores:
+   * both read the same arithmetic.
+   */
+  rowProbabilities(row: number, mask: boolean[]): {
+    allIn: number; noneIn: number; noneOut: number;
+  } {
+    const { p1, nLanguages } = this;
+    const base = row * nLanguages;
+    let allIn = 1;
+    let noneIn = 1;
+    let noneOut = 1;
+    for (let c = 0; c < nLanguages; c++) {
+      const prob = p1[base + c]!;
+      if (mask[c]) {
+        allIn *= prob;
+        noneIn *= 1 - prob;
+      } else {
+        noneOut *= 1 - prob;
+      }
+    }
+    return { allIn, noneIn, noneOut };
+  }
+
+  /**
    * Distinct attested innovation patterns, as boolean masks.
    *
    * This is what keeps the method tractable. A subgroup needs at least one
@@ -218,4 +246,64 @@ export function maskOf(members: number[], nLanguages: number): boolean[] {
   const mask = new Array<boolean>(nLanguages).fill(false);
   for (const m of members) mask[m] = true;
   return mask;
+}
+
+/**
+ * Which innovations actually produced a subgroup's score.
+ *
+ * The diagram says a subgroup is strong; this says why. No existing tool
+ * exposes it — the Marama engine returns totals and the published tables
+ * report epsilon, kappa and sigma, leaving the reader to go back to the
+ * spreadsheet to find out which sound change or lexical replacement is doing
+ * the work.
+ *
+ * Weights mirror the metric definitions exactly, so `sum(exclusive.weight)`
+ * is epsilon, `sum(supporting.weight)` is p, and `sum(conflicting.weight)` is
+ * q. An innovation nested strictly inside the subgroup is irrelevant to
+ * cohesiveness (K&F 2018: 70 fn. 9) and appears in none of the three lists.
+ */
+export function evidenceFor(
+  g: Glottometry,
+  dataset: Dataset,
+  mask: boolean[],
+  minWeight = 0.005,
+): SubgroupEvidence {
+  const evidence: SubgroupEvidence = { exclusive: [], supporting: [], conflicting: [] };
+
+  for (let r = 0; r < g.nInnovations; r++) {
+    const { allIn, noneIn, noneOut } = g.rowProbabilities(r, mask);
+
+    const exclusive = allIn * noneOut;
+    const conflicting = (1 - allIn - noneIn) * (1 - noneOut);
+    const supporting = allIn;
+
+    const participants: number[] = [];
+    const unknown: number[] = [];
+    const row = dataset.matrix[r]!;
+    for (let c = 0; c < g.nLanguages; c++) {
+      if (row[c] === 1) participants.push(c);
+      else if (row[c] === null || row[c] === undefined) unknown.push(c);
+    }
+
+    const base = { index: r, label: dataset.innovations[r] ?? `row ${r}`, participants, unknown };
+
+    if (exclusive > minWeight) {
+      evidence.exclusive.push({ ...base, role: 'exclusive', weight: exclusive });
+    }
+    // Exclusive innovations are a subset of supporting ones; list them under
+    // both, since "all members share this" is true of them too.
+    if (supporting > minWeight) {
+      evidence.supporting.push({ ...base, role: 'supporting', weight: supporting });
+    }
+    if (conflicting > minWeight) {
+      evidence.conflicting.push({ ...base, role: 'conflicting', weight: conflicting });
+    }
+  }
+
+  const byWeight = (a: EvidenceItem, b: EvidenceItem) =>
+    b.weight - a.weight || a.label.localeCompare(b.label);
+  evidence.exclusive.sort(byWeight);
+  evidence.supporting.sort(byWeight);
+  evidence.conflicting.sort(byWeight);
+  return evidence;
 }
