@@ -10,6 +10,7 @@
 
 import type { Scene } from './scene.js';
 import { fitLabel, labelHalfWidth, NODE_FILL, NODE_STROKE, NODE_TEXT } from './styles.js';
+import { versionStamp } from '../version.js';
 
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;')
@@ -39,6 +40,10 @@ export function exportSvg(scene: Scene, opts: ExportOptions = {}): string {
       `viewBox="${viewBox.x} ${viewBox.y} ${viewBox.width} ${totalHeight}">`,
   );
   lines.push(`  <title>${esc(title)}</title>`);
+  lines.push(
+    `  <desc>${esc(subtitle ? `${subtitle}. ` : '')}Historical Glottometry ` +
+      `after Kalyan &amp; François (2018). Drawn by ${esc(versionStamp())}.</desc>`,
+  );
   lines.push(
     `  <rect x="${viewBox.x}" y="${viewBox.y}" width="${viewBox.width}" ` +
       `height="${totalHeight}" fill="#ffffff"/>`,
@@ -89,7 +94,8 @@ export function exportSvg(scene: Scene, opts: ExportOptions = {}): string {
   if (subtitle) {
     lines.push(
       `  <text x="${viewBox.x + viewBox.width / 2}" y="${viewBox.y + totalHeight - 9}" text-anchor="middle" ` +
-        `font-family="system-ui, sans-serif" font-size="10" fill="#666">${esc(subtitle)}</text>`,
+        `font-family="system-ui, sans-serif" font-size="10" fill="#666">` +
+        `${esc(subtitle)} · ${esc(versionStamp())}</text>`,
     );
   }
 

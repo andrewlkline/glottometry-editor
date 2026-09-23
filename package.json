@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "fixtures": "python3 tools/gen_fixtures.py"
+    "fixtures": "python3 tools/gen_fixtures.py",
+    "demo": "python3 tools/make_demo.py"
   },
   "dependencies": {
     "react": "^19.0.0",

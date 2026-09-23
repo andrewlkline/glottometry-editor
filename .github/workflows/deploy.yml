@@ -1,0 +1,65 @@
+# Build the static site and publish it to GitHub Pages.
+#
+# The app is client-side only by design (BUILD_PLAN.md §1), so there is nothing
+# to run in production — Pages serves the built assets and every computation
+# happens in the visitor's browser. Their data never leaves the machine because
+# there is no server to send it to.
+#
+# Tests gate the deploy. A glottometric diagram is evidence about a language
+# family; shipping a build whose contour geometry or metrics are unverified
+# would be worse than shipping nothing.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it, but never queue more
+# than one behind it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22 LTS. Note vitest refuses odd-numbered releases such as 25, so
+          # this is not a free choice — see README, "Node version".
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
