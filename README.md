@@ -247,7 +247,7 @@ shebang resolves to the old v14.
 src/core/        metrics, candidates, seriation, layouts, MDS — pure, no DOM
 src/geometry/    tracks, capsule (chain contours), blob + marchingSquares (2-D)
 src/render/      scene, Diagram.tsx, styles, exportSvg
-src/data/        Marama CSV import/export (innovations + coordinates)
+src/data/        Marama CSV import/export; csv.ts tokeniser, csvCheck.ts validation, templates
 src/ui/App.tsx   the app
 prototype/       Python reference implementation + demo data
 tools/           fixture generation
@@ -293,6 +293,45 @@ The edit operations are a module of their own because they cascade: a language
 is referenced from the matrix columns, the coordinates, the manual order, the
 manual positions **and** every innovation's reflexes, so renaming or deleting
 one has to reach all five.
+
+### Importing CSVs: validation and feedback
+
+Every CSV goes through `data/csvCheck.ts` before it touches the project. The
+old parser accepted anything — an `x` cell became "unknown", a `14°12'S`
+coordinate silently dropped the language, and an unquoted comma in a label
+shifted its whole row one language to the right — and each produced a
+plausible, wrong diagram. Now each rule either **blocks** the import (the data
+would be misread; the project is left untouched and the report says so) or
+**warns** (read as written, but probably not what was meant). Issues are
+aggregated per rule, located by spreadsheet cell (`C14 (Beri): 'x'`), and carry
+a fix. The **CSV format** button shows both formats with worked examples and
+downloads templates; the coordinates template is pre-filled with the loaded
+languages, since exact name matching is the one thing people get wrong.
+
+Decisions that look odd but are deliberate:
+
+- **Blank is unknown, not 0.** Anything other than `1`/`0`/blank/`NA`/`-`/`?`
+  is refused rather than guessed, and the hint says so when the file looks like
+  it used `x` for "present" and blanks for "absent".
+- **"Present in every language" is `info`, not a warning.** K&F's own data has
+  ten such rows (family-defining innovations). They are not inert — each adds
+  to every subgroup's p — so they are still reported.
+- **A shifted row reports once.** Its half-label lands in a language cell;
+  flagging that as a bad value too would count one mistake twice.
+- **Latitude/longitude are read by position** (K&F's convention), so a header
+  that explicitly says `longitude, latitude` is refused, not silently swapped.
+- **Coordinate names differing only in case/spacing are matched** (and noted);
+  near misses (`Brei` → `Beri`, transposition counts as one edit) are only
+  *suggested*, since two similar names may be two lects.
+- **Loading a coordinates file replaces** the previous coordinates. Loading an
+  innovations file **keeps** the existing coordinates only if some names match.
+- Semicolon- and tab-separated files, BOMs, CR-only line endings, `1.0`, and
+  the typographic minus `−` are accepted; `.xlsx`, UTF-16 and non-UTF-8 text
+  are recognised and explained (Excel for Mac's plain "CSV" is Mac Roman and
+  garbles IPA).
+
+`parseMaramaCsv`/`parseCoordinatesCsv` are thin wrappers that throw on any
+blocking issue; the UI calls the checker directly so it can show everything.
 
 ### The fragmentation view
 

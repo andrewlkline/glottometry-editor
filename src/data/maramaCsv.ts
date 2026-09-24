@@ -5,82 +5,27 @@
  * languages. Cells are 1, 0, blank or 'NA'. This is the only interchange
  * format the field has, so round-tripping it losslessly is a hard requirement.
  *
- * Note K&F's own demo files use CR-only line endings (classic Mac), which is
- * why line splitting handles \r, \n and \r\n.
+ * Reading and validation live in `csv.ts` and `csvCheck.ts`; these wrappers
+ * are for callers that want a value or an exception.
  */
 
-import type { Cell, Dataset } from '../core/types.js';
+import type { Dataset } from '../core/types.js';
+import { checkCoordinatesCsv, checkInnovationsCsv, type Issue } from './csvCheck.js';
 
-function splitLines(text: string): string[] {
-  return text.split(/\r\n|\r|\n/).filter((l) => l.length > 0);
+/** Summarise a failed check as one message, for callers that just throw. */
+function failure(issues: Issue[]): Error {
+  const errors = issues.filter((i) => i.severity === 'error');
+  return new Error(errors.map((e) => e.message).join(' '));
 }
 
-/** Minimal RFC-4180-ish field splitter: handles quoted fields with commas. */
-function splitFields(line: string): string[] {
-  const out: string[] = [];
-  let field = '';
-  let quoted = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]!;
-    if (quoted) {
-      if (ch === '"') {
-        if (line[i + 1] === '"') {
-          field += '"';
-          i++;
-        } else {
-          quoted = false;
-        }
-      } else {
-        field += ch;
-      }
-    } else if (ch === '"') {
-      quoted = true;
-    } else if (ch === ',') {
-      out.push(field);
-      field = '';
-    } else {
-      field += ch;
-    }
-  }
-  out.push(field);
-  return out;
-}
-
-function parseCell(raw: string): Cell {
-  const v = raw.trim();
-  if (v === '1') return 1;
-  if (v === '0') return 0;
-  // Blank, '-', 'NA', 'na', '?' all mean "unknown".
-  return null;
-}
-
+/**
+ * Parse, throwing on anything the checker blocks. The app calls the checker
+ * directly so it can show every issue; this is for code that trusts its input.
+ */
 export function parseMaramaCsv(text: string): Dataset {
-  const lines = splitLines(text);
-  if (lines.length < 2) {
-    throw new Error('CSV needs a header row and at least one innovation row.');
-  }
-
-  const header = splitFields(lines[0]!);
-  const languages = header.slice(1).map((h) => h.trim()).filter((h) => h.length > 0);
-  if (languages.length === 0) {
-    throw new Error('No language columns found in the header row.');
-  }
-
-  const innovations: string[] = [];
-  const matrix: Cell[][] = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const fields = splitFields(lines[i]!);
-    const label = (fields[0] ?? '').trim();
-    innovations.push(label || `innovation ${i}`);
-    const row: Cell[] = new Array(languages.length);
-    for (let c = 0; c < languages.length; c++) {
-      row[c] = parseCell(fields[c + 1] ?? '');
-    }
-    matrix.push(row);
-  }
-
-  return { languages, innovations, matrix };
+  const { value, issues } = checkInnovationsCsv(text);
+  if (!value) throw failure(issues);
+  return value;
 }
 
 export function toMaramaCsv(dataset: Dataset): string {
@@ -107,16 +52,7 @@ export interface LanguageCoordinates {
  * titled — so position is authoritative here, not the header text.
  */
 export function parseCoordinatesCsv(text: string): LanguageCoordinates {
-  const lines = splitLines(text);
-  const out: LanguageCoordinates = {};
-
-  for (let i = 1; i < lines.length; i++) {  // row 0 is the header
-    const fields = splitFields(lines[i]!);
-    const label = (fields[0] ?? '').trim();
-    const lat = Number(fields[1]);
-    const lon = Number(fields[2]);
-    if (!label || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-    out[label] = { lat, lon };
-  }
-  return out;
+  const { value, issues } = checkCoordinatesCsv(text);
+  if (!value) throw failure(issues);
+  return value;
 }

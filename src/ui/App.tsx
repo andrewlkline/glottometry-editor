@@ -7,6 +7,11 @@ import {
 import { classicalMds, cohesivenessMatrix, distanceMatrix } from '../core/mds.js';
 import { parseCoordinatesCsv, parseMaramaCsv } from '../data/maramaCsv.js';
 import {
+  checkCoordinatesCsv, checkInnovationsCsv, crossCheckCoordinates, type Issue,
+} from '../data/csvCheck.js';
+import { ImportReport, type ImportReportData } from './ImportReport.js';
+import { FormatGuide } from './FormatGuide.js';
+import {
   createProject, downloadProject, parseProject, resolveOrder, type Project,
 } from '../data/project.js';
 import { buildScene } from '../render/scene.js';
@@ -40,6 +45,8 @@ export function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<ImportReportData | null>(null);
+  const [showFormat, setShowFormat] = useState(false);
 
   const loadDemo = useCallback(async () => {
     try {
@@ -52,6 +59,7 @@ export function App() {
       ));
       setSelected(null);
       setError(null);
+      setReport(null);
     } catch (e) {
       setError(String(e));
     }
@@ -219,23 +227,63 @@ export function App() {
 
   const selectedSubgroup = scene?.contours.find((c) => c.key === selected)?.subgroup ?? null;
 
+  /**
+   * Every CSV goes through the checker, and anything it has to say is shown.
+   * A refused file changes nothing; a loaded one may still carry warnings.
+   */
   const openFile = async (file: File, kind: 'innovations' | 'coordinates' | 'project') => {
-    try {
-      const text = await file.text();
-      if (kind === 'project') {
+    const text = await file.text();
+    const show = (imported: boolean, issues: Issue[]) =>
+      setReport(!imported || issues.length > 0
+        ? { fileName: file.name, kind, imported, issues }
+        : null);
+    setError(null);
+
+    if (kind === 'project') {
+      try {
         history.reset(parseProject(text));
-      } else if (kind === 'innovations') {
-        history.reset(createProject(
-          file.name.replace(/\.csv$/i, ''), parseMaramaCsv(text), project?.coordinates,
-        ));
-      } else {
-        patch({ coordinates: parseCoordinatesCsv(text) }, 'load coordinates');
+        setSelected(null);
+        show(true, []);
+      } catch (e) {
+        show(false, [{ severity: 'error', message: e instanceof Error ? e.message : String(e) }]);
       }
-      setSelected(null);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      return;
     }
+
+    if (kind === 'innovations') {
+      const { value, issues } = checkInnovationsCsv(text);
+      if (!value) return show(false, issues);
+      // Coordinates already loaded carry over when they belong to these
+      // languages. If none of their names match, they were for a different
+      // dataset, and warning about every one of them would only be noise.
+      let coordinates = project?.coordinates;
+      const extra: Issue[] = [];
+      if (coordinates) {
+        const cross = crossCheckCoordinates(coordinates, value.languages);
+        if (cross.matched === 0) coordinates = undefined;
+        else {
+          coordinates = cross.coordinates;
+          extra.push(...cross.issues);
+        }
+      }
+      history.reset(createProject(file.name.replace(/\.csv$/i, ''), value, coordinates));
+      setSelected(null);
+      return show(true, [...issues, ...extra]);
+    }
+
+    const { value, issues } = checkCoordinatesCsv(text);
+    if (!value || !dataset) return show(false, issues);
+    const cross = crossCheckCoordinates(value, dataset.languages);
+    if (cross.matched === 0) {
+      return show(false, [...issues, {
+        severity: 'error',
+        message: 'None of the names in this file match a language in the loaded innovations.',
+        examples: Object.keys(value).slice(0, 6).map((l) => `'${l}'`),
+        hint: `The languages are: ${dataset.languages.join(', ')}. Names must match exactly.`,
+      }]);
+    }
+    patch({ coordinates: cross.coordinates }, 'load coordinates');
+    show(true, [...issues, ...cross.issues]);
   };
 
   const onReorder = useCallback((language: number, toPosition: number) => {
@@ -321,6 +369,9 @@ export function App() {
           <FileButton label="innovations CSV" accept=".csv" onPick={(f) => openFile(f, 'innovations')} />
           <FileButton label="coordinates CSV" accept=".csv" onPick={(f) => openFile(f, 'coordinates')} />
           <button onClick={() => void loadDemo()}>demo</button>
+          <button onClick={() => setShowFormat((v) => !v)} aria-expanded={showFormat}>
+            CSV format
+          </button>
         </div>
       </header>
 
@@ -392,6 +443,20 @@ export function App() {
       </div>
 
       {error && <p style={S.error}>{error}</p>}
+      {report && (
+        <ImportReport
+          report={report}
+          onClose={() => setReport(null)}
+          onShowFormat={() => setShowFormat(true)}
+        />
+      )}
+      {showFormat && (
+        <FormatGuide
+          languages={dataset.languages}
+          coordinates={project.coordinates}
+          onClose={() => setShowFormat(false)}
+        />
+      )}
 
       {scene && scored && (
         <>
