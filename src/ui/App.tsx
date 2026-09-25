@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useHistory } from './history.js';
 import { Glottometry } from '../core/metrics.js';
+import type { Subgroup } from '../core/types.js';
 import {
   chainLayout, orderFor, planarLayout, projectGeographic, type Layout, type LayoutKind,
 } from '../core/layout.js';
@@ -11,6 +12,7 @@ import {
 } from '../data/csvCheck.js';
 import { ImportReport, type ImportReportData } from './ImportReport.js';
 import { FormatGuide } from './FormatGuide.js';
+import { QualityLegend } from './QualityLegend.js';
 import {
   createProject, downloadProject, parseProject, resolveOrder, type Project,
 } from '../data/project.js';
@@ -28,7 +30,8 @@ import {
   renameInnovation, renameLanguage, setRow, updateMeta,
 } from '../data/edit.js';
 import { reconcile } from '../data/innovationMeta.js';
-import { assessQuality } from '../core/quality.js';
+import { assessQuality, highQualitySubset } from '../core/quality.js';
+import { applyQualityOverlay } from '../render/qualityOverlay.js';
 import { linkageStages, stageAt } from '../core/chronology.js';
 import {
   INNOVATION_TYPES, applyTypeSettings, describeTypeSettings, typeCounts as countTypes,
@@ -152,7 +155,7 @@ export function App() {
       dataset, enabled, settings.typeWeights, typeOverrides,
     );
     const g = new Glottometry(filtered, settings.policy, weights);
-    return { g, dataset: filtered, rows, subgroups: g.subgroups() };
+    return { g, dataset: filtered, rows, weights, subgroups: g.subgroups() };
   }, [dataset, settings?.policy, settings?.enabledTypes, settings?.typeWeights, typeOverrides]);
 
   const strengthOf = useCallback(
@@ -204,12 +207,58 @@ export function App() {
 
   const hidden = useMemo(() => new Set(project?.hidden ?? []), [project?.hidden]);
 
-  const scene = useMemo(() => {
+  const baseScene = useMemo(() => {
     if (!layout || !scored || !settings) return null;
     return buildScene(
       layout, scored.subgroups.filter((s) => strengthOf(s) >= settings.minStrength),
     );
   }, [layout, scored, settings?.minStrength, strengthOf]);
+
+  const [showQuality, setShowQuality] = useState(false);
+  const [showSurvival, setShowSurvival] = useState(false);
+
+  /** Quality class of a row of the scored (type-filtered) dataset. */
+  const classOfScored = useCallback(
+    (r: number) => qualities[scored?.rows[r] ?? -1]?.quality ?? 'undetermined',
+    [qualities, scored],
+  );
+
+  /**
+   * The same analysis on high-quality innovations only, for the survival
+   * overlay. Null when off; `count` 0 when nothing is assessed high yet, in
+   * which case nothing is faded — "nothing survives" would be a statement
+   * about the assessment, not the family.
+   */
+  const highOnly = useMemo(() => {
+    if (!showSurvival || !scored || !settings) return null;
+    const subset = highQualitySubset(
+      scored.dataset, scored.weights, (r) => classOfScored(r) === 'high',
+    );
+    const count = subset.dataset.innovations.length;
+    const byKey = new Map<string, Subgroup>();
+    if (count > 0) {
+      const g = new Glottometry(subset.dataset, settings.policy, subset.weights);
+      for (const s of g.subgroups()) byKey.set(s.members.join(','), s);
+    }
+    return { count, byKey };
+  }, [showSurvival, scored, settings?.policy, classOfScored]);
+
+  const survives = useCallback(
+    (key: string) => {
+      const s = highOnly?.byKey.get(key);
+      return !!s && strengthOf(s) >= (settings?.minStrength ?? Infinity);
+    },
+    [highOnly, strengthOf, settings?.minStrength],
+  );
+
+  /** The scene as drawn: geometry from `baseScene`, line style from quality. */
+  const scene = useMemo(() => {
+    if (!baseScene || !scored) return baseScene;
+    return applyQualityOverlay(baseScene, scored.g, classOfScored, {
+      lines: showQuality,
+      survives: highOnly && highOnly.count > 0 ? survives : undefined,
+    });
+  }, [baseScene, scored, showQuality, highOnly, survives, classOfScored]);
 
   /**
    * Fragmentation stages over the full scored set, not the displayed subset.
@@ -336,10 +385,11 @@ export function App() {
   }, [dataset, history]);
 
   /** Everything that shaped the diagram, recorded in the exported SVG. */
+  const measureName = settings?.measure === 'significance'
+    ? '−log₁₀p' : settings?.measure === 'epsilon' ? 'ε' : 'ς';
+
   const exportSubtitle = useMemo(() => {
     if (!settings || !scored || !dataset) return '';
-    const measureName = settings.measure === 'significance'
-      ? '−log₁₀p' : settings.measure === 'epsilon' ? 'ε' : 'ς';
     const parts = [
       `${visible.length} subgroups with ${measureName} ≥ ${settings.minStrength.toFixed(2)}`,
       `${LAYOUT_LABELS[settings.layoutKind]} layout`,
@@ -356,8 +406,18 @@ export function App() {
     if (showFragmentation && stage) {
       parts.push(`${stage.components.length} connected components`);
     }
+    // The overlay changes what the lines mean, so the figure has to say so.
+    if (showQuality) {
+      parts.push('line style: solid = high-quality exclusive support, dashed = low-quality only, '
+        + 'dotted = not yet assessed');
+    }
+    if (highOnly && highOnly.count > 0) {
+      parts.push(`faded: below ${measureName} ≥ ${settings.minStrength.toFixed(2)} on the `
+        + `${highOnly.count} high-quality innovations alone`);
+    }
     return parts.join(' · ');
-  }, [settings, scored, dataset, typeOverrides, visible.length, showFragmentation, stage]);
+  }, [settings, scored, dataset, typeOverrides, visible.length, showFragmentation, stage,
+    showQuality, highOnly]);
 
   const edit = useCallback(
     (fn: (p: Project) => Project, label: string, key?: string) =>
@@ -445,6 +505,28 @@ export function App() {
           />
           fragmentation
         </label>
+        <label
+          style={S.toggle}
+          title="Line style by what each group's exclusive support rests on"
+        >
+          <input
+            type="checkbox"
+            checked={showQuality}
+            onChange={(e) => setShowQuality(e.target.checked)}
+          />
+          quality lines
+        </label>
+        <label
+          style={S.toggle}
+          title="Fade groups that do not clear the threshold on high-quality innovations alone"
+        >
+          <input
+            type="checkbox"
+            checked={showSurvival}
+            onChange={(e) => setShowSurvival(e.target.checked)}
+          />
+          high-quality survival
+        </label>
         {edited && <button onClick={resetLayout} title="Discard manual positions">reset layout</button>}
         <span style={S.spacer} />
         <button onClick={() => downloadProject(project)}>save project</button>
@@ -496,6 +578,19 @@ export function App() {
               drag a language to {settings.layoutKind === 'chain' ? 'reorder' : 'move'} it
             </span>
           </p>
+
+          {(showQuality || showSurvival) && mode === 'diagram' && (
+            <QualityLegend
+              lines={showQuality}
+              survival={highOnly && {
+                highCount: highOnly.count,
+                fadedCount: visible.filter((c) => c.quality?.survives === false).length,
+              }}
+              measure={measureName}
+              threshold={settings.minStrength}
+              visibleCount={visible.length}
+            />
+          )}
 
           {mode === 'data' ? (
             <div style={S.dataWorkspace}>
@@ -613,6 +708,12 @@ export function App() {
                 glottometry={scored.g}
                 dataset={scored.dataset}
                 qualityOf={(r) => qualities[scored.rows[r]!]}
+                support={showQuality
+                  ? scene.contours.find((c) => c.key === selected)?.quality?.support
+                  : undefined}
+                highOnly={highOnly && highOnly.count > 0 && selected
+                  ? { subgroup: highOnly.byKey.get(selected) ?? null, survives: survives(selected) }
+                  : undefined}
                 subgroup={selectedSubgroup}
                 onClose={() => setSelected(null)}
               />

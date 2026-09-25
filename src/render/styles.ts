@@ -14,7 +14,37 @@
 export interface ContourStyle {
   strokeWidth: number;
   stroke: string;
+  /** SVG dash pattern; solid when absent. */
+  dasharray?: string;
+  /** 0–1; fully opaque when absent. */
+  opacity?: number;
 }
+
+/**
+ * Line style for what a group's exclusive support rests on.
+ *
+ * Solid for high-quality support, so a diagram where it holds looks like an
+ * ordinary glottometric diagram. Dashes and dots are scaled to the stroke:
+ * with round caps each dash grows by the stroke width and each gap shrinks by
+ * it, so fixed patterns would close up on thick lines and vanish on thin ones.
+ * Dotted is zero-length dashes, which round caps turn into dots.
+ */
+export function supportDash(
+  support: 'high' | 'low' | 'unassessed',
+  strokeWidth: number,
+): string | undefined {
+  const w = strokeWidth;
+  if (support === 'low') {
+    return `${fmt(Math.max(4, 1.6 * w))} ${fmt(w + Math.max(4, 1.4 * w))}`;
+  }
+  if (support === 'unassessed') return `0 ${fmt(w + Math.max(3, 1.1 * w))}`;
+  return undefined;
+}
+
+/** Opacity of a group that does not survive on high-quality evidence alone. */
+export const FADED_OPACITY = 0.22;
+
+const fmt = (n: number) => String(Math.round(n * 100) / 100);
 
 export interface StyleScale {
   /** Largest sigma in the current dataset, for normalising widths. */

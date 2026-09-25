@@ -107,7 +107,7 @@ export function Diagram({
         {contours.map((c) => {
           if (hidden?.has(c.key)) return null;
           const active = emphasised === c.key;
-          const opacity = !dimmed ? 1 : active ? 1 : 0.12;
+          const opacity = (c.style.opacity ?? 1) * (!dimmed ? 1 : active ? 1 : 0.12);
           return (
             <g
               key={c.key}
@@ -127,6 +127,7 @@ export function Diagram({
                   d={d}
                   stroke={c.style.stroke}
                   strokeWidth={c.style.strokeWidth}
+                  strokeDasharray={c.style.dasharray}
                 />
               ))}
             </g>

@@ -57,7 +57,13 @@ export function exportSvg(scene: Scene, opts: ExportOptions = {}): string {
       `    <g data-subgroup="${esc(label)}" ` +
         `data-sigma="${sigma.toFixed(3)}" data-kappa="${kappa.toFixed(3)}" ` +
         `data-epsilon="${epsilon.toFixed(3)}" ` +
-        `stroke="${c.style.stroke}" stroke-width="${c.style.strokeWidth.toFixed(2)}">`,
+        (c.quality ? `data-support="${c.quality.support}" ` : '') +
+        (c.quality?.survives !== undefined ? `data-survives="${c.quality.survives}" ` : '') +
+        `stroke="${c.style.stroke}" stroke-width="${c.style.strokeWidth.toFixed(2)}"` +
+        (c.style.dasharray ? ` stroke-dasharray="${c.style.dasharray}"` : '') +
+        (c.style.opacity !== undefined && c.style.opacity < 1
+          ? ` opacity="${c.style.opacity}"` : '') +
+        '>',
     );
     lines.push(
       `      <title>${esc(label)} — ς ${sigma.toFixed(2)}, κ ${kappa.toFixed(2)}, ε ${epsilon.toFixed(2)}</title>`,

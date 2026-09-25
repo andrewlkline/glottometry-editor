@@ -285,8 +285,8 @@ A second axis beside type, after Smith (2025: 659–662): how safely a row can b
 read as inherited rather than borrowed. Recorded per row (detail pane, or label
 prefix), shown in the grid (● high, ○ low, – undetermined; filterable, with an
 "assessed n/N" count) and in the evidence panel, which splits the current total
-by class (`ε 5.00 = 2.00 high + 0.50 low + 2.50 undetermined`). **It does not
-affect scoring** — how quality should enter the diagram is a separate decision.
+by class (`ε 5.00 = 2.00 high + 0.50 low + 2.50 undetermined`). **It never
+changes a score**; in the diagram it is decoration only (below).
 
 - **Fields:** lexical status (replacement / synonymic / novel concept /
   indeterminate — Smith's ex. 5 and fn. 4, meaningful for Lex only), sound
@@ -303,6 +303,31 @@ affect scoring** — how quality should enter the diagram is a separate decision
   colon for a judgement on any type (`ISC+:`, `Lex-S-:`). K&F's analyzer treats
   labels as text, so such files still load there. The checker warns about a
   status letter on a non-Lex type or an unknown letter.
+
+**In the diagram** (`render/qualityOverlay.ts`, two toggles, both off by
+default so a plain K&F diagram is unchanged):
+
+- **Quality lines.** Solid = at least one high-quality exclusive innovation
+  (expected count ≥ 0.5, i.e. even odds under unknown cells); dashed = none,
+  and the support is fully assessed, i.e. it rests on low-quality evidence;
+  dotted = none *yet*, with unassessed innovations that could still supply one.
+  The dotted class is what keeps "dashed" a finding rather than an artefact of
+  an unassessed dataset — the plain demo draws everything dotted. The support
+  split uses **expected counts, ignoring type weights**: a weight says how much
+  an innovation counts, not whether it exists.
+- **High-quality survival.** Re-scores on the high-quality rows only (same NA
+  policy, measure, threshold and type weights) and fades groups that no longer
+  clear the threshold. This can raise κ as well as lower ε, since low-quality
+  conflicting innovations go too. With **no** rows assessed high nothing is
+  faded and a notice says why, rather than fading everything.
+- **It is harsh by design, and that is worth knowing.** The threshold is in
+  units of innovations, so a thin high-quality evidence base fails it: on the
+  demo with 20 of 170 rows judged high, all 14 groups fade; with 65, four
+  survive. That is Smith's point about lexically defined subgroups, but it also
+  means "fades" partly measures how much has been assessed. The evidence panel
+  shows each group's high-only ς/κ/ε so the margin is visible.
+- Exports carry the meaning in the caption, `stroke-dasharray`/`opacity` on
+  each contour, and `data-support` / `data-survives` attributes.
 
 This is the question a comparativist actually has, and no existing tool answers
 it. The Marama engine returns totals; the published tables stop at ε, κ and ς.
@@ -532,10 +557,11 @@ contour-engine design, phasing and risks.
 - [ ] No contact with Kalyan/François. They invite it ("feel free to contact
       us"), and they would be the natural first users and reviewers.
 - [x] On GitHub (`andrewlkline/glottometry-editor`), deployed to Pages.
-- [x] Innovation quality recorded and shown (not yet used in the diagram).
-- [ ] Quality in the diagram: solid vs dashed contours by whether any
-      high-quality exclusive innovation supports a group, and a "survival"
-      overlay fading groups that vanish on high-quality evidence alone.
+- [x] Innovation quality recorded and shown.
+- [x] Quality in the diagram: line style by exclusive support, and a
+      high-quality survival overlay.
+- [ ] Survival uses the main threshold; a separate or relative survival
+      threshold may be wanted once real assessed data shows how harsh it is.
 - [ ] Hybrid tree + linkage + contact-zone hypotheses over the same matrix
       (see the discussion of Kaufman 2026 / Edwards 2021); needs the above.
 

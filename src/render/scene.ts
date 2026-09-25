@@ -41,6 +41,12 @@ export interface ContourShape {
    * sparse-layout bug survived a green suite.
    */
   rings?: Point[][];
+  /**
+   * What the group's exclusive support rests on, and whether it survives on
+   * high-quality evidence alone. Set by the quality overlay, not by the
+   * geometry; absent when the overlay is off.
+   */
+  quality?: { support: 'high' | 'low' | 'unassessed'; survives?: boolean };
 }
 
 export interface Scene {

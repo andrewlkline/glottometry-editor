@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { evidenceFor, maskOf, type Glottometry } from '../core/metrics.js';
 import type { Dataset, EvidenceItem, Subgroup } from '../core/types.js';
-import { QUALITY_CLASSES, type QualityClass, type QualityJudgement } from '../core/quality.js';
+import {
+  QUALITY_CLASSES, type QualityClass, type QualityJudgement, type SupportClass,
+} from '../core/quality.js';
 import { QUALITY_COLOUR, QualityMark } from './QualityMark.js';
 
 export interface EvidencePanelProps {
@@ -11,8 +13,21 @@ export interface EvidencePanelProps {
   subgroup: Subgroup;
   /** Quality of a row of `dataset`. */
   qualityOf: (row: number) => QualityJudgement | undefined;
+  /** What the group's exclusive support rests on, when the overlay is on. */
+  support?: SupportClass;
+  /**
+   * The group scored on high-quality innovations only: undefined when the
+   * survival overlay is off, null when the group is not attested there.
+   */
+  highOnly?: { subgroup: Subgroup | null; survives: boolean };
   onClose: () => void;
 }
+
+const SUPPORT_TEXT: Record<SupportClass, string> = {
+  high: 'rests on at least one high-quality exclusive innovation',
+  low: 'rests on low-quality exclusive innovations only',
+  unassessed: 'has no high-quality exclusive innovation yet; some are unassessed',
+};
 
 const TOTAL: Record<Tab, string> = { exclusive: 'ε', supporting: 'p', conflicting: 'q' };
 
@@ -33,7 +48,7 @@ const BLURB: Record<Tab, string> = {
  * actually has.
  */
 export function EvidencePanel({
-  glottometry, dataset, subgroup, qualityOf, onClose,
+  glottometry, dataset, subgroup, qualityOf, support, highOnly, onClose,
 }: EvidencePanelProps) {
   const [tab, setTab] = useState<Tab>('exclusive');
 
@@ -67,6 +82,19 @@ export function EvidencePanel({
             ς {subgroup.sigma.toFixed(2)} · κ {subgroup.kappa.toFixed(2)} · ε{' '}
             {subgroup.epsilon.toFixed(2)}
           </div>
+          {support && <div style={S.quality}>Support {SUPPORT_TEXT[support]}.</div>}
+          {highOnly && (
+            <div style={S.quality}>
+              On high-quality evidence alone:{' '}
+              {highOnly.subgroup
+                ? <>ς {highOnly.subgroup.sigma.toFixed(2)} · κ {highOnly.subgroup.kappa.toFixed(2)}
+                    {' '}· ε {highOnly.subgroup.epsilon.toFixed(2)}</>
+                : 'not attested'}
+              {highOnly.survives
+                ? <span style={S.survives}> — survives</span>
+                : <span style={S.fails}> — below the threshold</span>}
+            </div>
+          )}
         </div>
         <button onClick={onClose} style={S.close} aria-label="Close">×</button>
       </div>
@@ -198,6 +226,9 @@ const S: Record<string, React.CSSProperties> = {
     margin: '0 0 0.5rem', fontVariantNumeric: 'tabular-nums',
   },
   plus: { color: '#999' },
+  quality: { fontSize: '0.7rem', color: '#666', marginTop: '0.15rem', lineHeight: 1.4 },
+  survives: { color: '#2a6f3e' },
+  fails: { color: '#b86e12' },
   label: { fontFamily: 'ui-monospace, monospace', fontSize: '0.74rem' },
   weight: { color: '#a60', fontVariantNumeric: 'tabular-nums', fontSize: '0.7rem' },
   pattern: { display: 'flex', flexWrap: 'wrap', gap: 2, marginTop: 3 },

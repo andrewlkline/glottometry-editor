@@ -30,11 +30,14 @@
  * the lexical statuses — which carry Smith's own definitions — nothing is
  * inferred. An unassessed row says so.
  *
- * Nothing here affects scoring. Quality is recorded and shown; how it should
- * enter the diagram is a separate decision.
+ * Nothing here changes a score. Quality enters the diagram only as
+ * decoration (see `supportClass` and `highQualitySubset`): K&F's numbers stay
+ * exactly as they define them, and the reader sees what they rest on.
  */
 
 import { splitPrefix, typeOf, type InnovationType } from './innovationTypes.js';
+import type { Glottometry } from './metrics.js';
+import type { Dataset } from './types.js';
 
 /** Smith (2025: 659, ex. 5; 662 fn. 4). */
 export type LexicalStatus = 'replacement' | 'synonymic' | 'novel' | 'indeterminate';
@@ -164,4 +167,82 @@ export function qualityCounts(judgements: QualityJudgement[]): Record<QualityCla
   const counts: Record<QualityClass, number> = { high: 0, low: 0, undetermined: 0 };
   for (const j of judgements) counts[j.quality]++;
   return counts;
+}
+
+// ---------------------------------------------------------------------------
+// Quality in the diagram
+
+/**
+ * A group's exclusively shared innovations, counted by quality class.
+ *
+ * Expected counts, not weighted totals: a type weight says how much an
+ * innovation should count, not whether it exists, and "is there a
+ * high-quality innovation behind this group?" is a question about existence.
+ * Down-weighting Lex to 0.25 must not make a replacement stop counting as one.
+ * (The evidence panel's split is weighted instead, because it decomposes ε.)
+ */
+export function exclusiveByQuality(
+  g: Glottometry,
+  mask: boolean[],
+  classOf: (row: number) => QualityClass,
+): Record<QualityClass, number> {
+  const out: Record<QualityClass, number> = { high: 0, low: 0, undetermined: 0 };
+  for (let r = 0; r < g.nInnovations; r++) {
+    const { allIn, noneOut } = g.rowProbabilities(r, mask);
+    out[classOf(r)] += allIn * noneOut;
+  }
+  return out;
+}
+
+/**
+ * The expected count at which a class is taken to be present: even odds that
+ * at least one such innovation is exclusive to the group. Below it, a lone
+ * high-quality innovation with an unknown cell in a member (0.5 under the
+ * default NA policy) still counts; one that is probably shared by an outsider
+ * does not.
+ */
+export const SUPPORT_THRESHOLD = 0.5;
+
+/**
+ * What a group's exclusive support rests on.
+ *
+ * - `high`: at least one high-quality exclusively shared innovation.
+ * - `low`: none, and the support is assessed — it rests on low-quality
+ *   evidence, Smith's (2025: 658–659) contact-zone profile.
+ * - `unassessed`: none yet, but unassessed innovations could still supply one.
+ *
+ * The third class keeps the second honest: until the evidence is assessed, "no
+ * high-quality support" is not a finding.
+ */
+export type SupportClass = 'high' | 'low' | 'unassessed';
+
+export function supportClass(byQuality: Record<QualityClass, number>): SupportClass {
+  if (byQuality.high >= SUPPORT_THRESHOLD) return 'high';
+  if (byQuality.undetermined >= SUPPORT_THRESHOLD) return 'unassessed';
+  return 'low';
+}
+
+/**
+ * The rows judged high quality, with their weights kept aligned.
+ *
+ * Scoring this subset asks Smith's question of every group at once: does it
+ * survive when only the evidence that can bear the weight is kept? Note it can
+ * raise a group's κ as well as lower its ε, since low-quality conflicting
+ * innovations go too.
+ */
+export function highQualitySubset(
+  dataset: Dataset,
+  weights: Float64Array | null,
+  isHigh: (row: number) => boolean,
+): { dataset: Dataset; weights: Float64Array | null } {
+  const keep: number[] = [];
+  for (let r = 0; r < dataset.innovations.length; r++) if (isHigh(r)) keep.push(r);
+  return {
+    dataset: {
+      languages: dataset.languages,
+      innovations: keep.map((r) => dataset.innovations[r]!),
+      matrix: keep.map((r) => dataset.matrix[r]!),
+    },
+    weights: weights ? Float64Array.from(keep, (r) => weights[r]!) : null,
+  };
 }
