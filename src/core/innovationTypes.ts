@@ -63,17 +63,60 @@ export function typeOf(label: string): InnovationType {
   return ALIASES[prefix] ?? 'untyped';
 }
 
-export function typesOf(dataset: Dataset): InnovationType[] {
-  return dataset.innovations.map(typeOf);
+/**
+ * Per-row explicit types, aligned with the dataset's rows.
+ *
+ * The editor lets a row's type be set outright, stored in its metadata, so the
+ * label prefix is only a fallback. Everything that scores or counts by type has
+ * to take these into account: a row shown as ISC in the grid but filtered and
+ * weighted as `untyped` would make the type controls quietly wrong.
+ */
+export type TypeOverrides = ReadonlyArray<InnovationType | undefined>;
+
+/** The type a row is treated as: explicit if set, else from its label. */
+export function resolveType(label: string, override?: InnovationType): InnovationType {
+  return override ?? typeOf(label);
+}
+
+export function typesOf(dataset: Dataset, overrides?: TypeOverrides): InnovationType[] {
+  return dataset.innovations.map((label, i) => resolveType(label, overrides?.[i]));
 }
 
 /** How many innovations fall into each type present in the dataset. */
-export function typeCounts(dataset: Dataset): Map<InnovationType, number> {
+export function typeCounts(dataset: Dataset, overrides?: TypeOverrides): Map<InnovationType, number> {
   const counts = new Map<InnovationType, number>();
-  for (const type of typesOf(dataset)) {
+  for (const type of typesOf(dataset, overrides)) {
     counts.set(type, (counts.get(type) ?? 0) + 1);
   }
   return counts;
+}
+
+function keptRows(types: InnovationType[], enabled: ReadonlySet<InnovationType>): number[] {
+  const keep: number[] = [];
+  for (let i = 0; i < types.length; i++) if (enabled.has(types[i]!)) keep.push(i);
+  return keep;
+}
+
+function selectRows(dataset: Dataset, keep: number[]): Dataset {
+  if (keep.length === dataset.innovations.length) return dataset;
+  return {
+    languages: dataset.languages,
+    innovations: keep.map((i) => dataset.innovations[i]!),
+    matrix: keep.map((i) => dataset.matrix[i]!),
+  };
+}
+
+function weightsFromTypes(
+  types: InnovationType[],
+  typeWeights: Partial<Record<InnovationType, number>> | undefined,
+): Float64Array | null {
+  if (!typeWeights) return null;
+  const values = Object.values(typeWeights);
+  if (values.length === 0 || values.every((w) => w === 1)) return null;
+
+  const weights = new Float64Array(types.length);
+  for (let i = 0; i < types.length; i++) weights[i] = typeWeights[types[i]!] ?? 1;
+  return weights;
 }
 
 /**
@@ -88,17 +131,9 @@ export function typeCounts(dataset: Dataset): Map<InnovationType, number> {
 export function filterByType(
   dataset: Dataset,
   enabled: ReadonlySet<InnovationType>,
+  overrides?: TypeOverrides,
 ): Dataset {
-  const types = typesOf(dataset);
-  const keep: number[] = [];
-  for (let i = 0; i < types.length; i++) if (enabled.has(types[i]!)) keep.push(i);
-
-  if (keep.length === dataset.innovations.length) return dataset;
-  return {
-    languages: dataset.languages,
-    innovations: keep.map((i) => dataset.innovations[i]!),
-    matrix: keep.map((i) => dataset.matrix[i]!),
-  };
+  return selectRows(dataset, keptRows(typesOf(dataset, overrides), enabled));
 }
 
 /**
@@ -110,13 +145,56 @@ export function filterByType(
 export function weightsFor(
   dataset: Dataset,
   typeWeights: Partial<Record<InnovationType, number>> | undefined,
+  overrides?: TypeOverrides,
 ): Float64Array | null {
-  if (!typeWeights) return null;
-  const values = Object.values(typeWeights);
-  if (values.length === 0 || values.every((w) => w === 1)) return null;
+  return weightsFromTypes(typesOf(dataset, overrides), typeWeights);
+}
 
-  const types = typesOf(dataset);
-  const weights = new Float64Array(types.length);
-  for (let i = 0; i < types.length; i++) weights[i] = typeWeights[types[i]!] ?? 1;
-  return weights;
+/**
+ * Filter and weight in one step, which is what the scorer needs.
+ *
+ * Doing them separately would mean re-aligning the overrides with the
+ * filtered rows, and a misalignment there would weight the wrong innovations
+ * without any visible symptom.
+ */
+export function applyTypeSettings(
+  dataset: Dataset,
+  enabled: ReadonlySet<InnovationType>,
+  typeWeights: Partial<Record<InnovationType, number>> | undefined,
+  overrides?: TypeOverrides,
+): { dataset: Dataset; weights: Float64Array | null } {
+  const types = typesOf(dataset, overrides);
+  const keep = keptRows(types, enabled);
+  return {
+    dataset: selectRows(dataset, keep),
+    weights: weightsFromTypes(keep.map((i) => types[i]!), typeWeights),
+  };
+}
+
+/**
+ * The type settings in words, for the exported figure's caption.
+ *
+ * Spelled out rather than flagged: a figure has to be reproducible from its
+ * own caption, and "type-weighted" does not say how. Only types present in the
+ * data are mentioned, and a weight on an excluded type is moot, so omitted.
+ */
+export function describeTypeSettings(
+  present: ReadonlyMap<InnovationType, number>,
+  enabledTypes: readonly InnovationType[] | undefined,
+  typeWeights: Partial<Record<InnovationType, number>> | undefined,
+): string[] {
+  const name = (t: InnovationType) => (t === 'untyped' ? TYPE_LABELS[t] : t);
+  const enabled = enabledTypes ?? INNOVATION_TYPES;
+  const excluded = INNOVATION_TYPES.filter((t) => present.has(t) && !enabled.includes(t));
+  const weighted = INNOVATION_TYPES.filter((t) => {
+    const w = typeWeights?.[t];
+    return w !== undefined && w !== 1 && present.has(t) && !excluded.includes(t);
+  });
+
+  const parts: string[] = [];
+  if (excluded.length > 0) parts.push(`excluding ${excluded.map(name).join(', ')}`);
+  if (weighted.length > 0) {
+    parts.push(`weights ${weighted.map((t) => `${name(t)} ×${typeWeights![t]}`).join(', ')}`);
+  }
+  return parts;
 }

@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { Cell, Dataset } from '../core/types.js';
 import {
-  INNOVATION_TYPES, TYPE_LABELS, typeOf, type InnovationType,
+  INNOVATION_TYPES, TYPE_LABELS, resolveType, type InnovationType,
 } from '../core/innovationTypes.js';
 import type { InnovationMeta } from '../data/innovationMeta.js';
 
@@ -24,7 +24,7 @@ const OVERSCAN = 8;
 
 /** The type a row is currently treated as: explicit if set, else from the label. */
 export function effectiveType(label: string, meta: InnovationMeta | undefined): InnovationType {
-  return meta?.type ?? typeOf(label);
+  return resolveType(label, meta?.type);
 }
 
 /**

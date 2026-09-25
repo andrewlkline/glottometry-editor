@@ -15,8 +15,8 @@ import { fileURLToPath } from 'node:url';
 import { Glottometry } from '../src/core/metrics.js';
 import { fisherExact, fisherStrength } from '../src/core/fisher.js';
 import {
-  INNOVATION_TYPES, filterByType, typeCounts, typeOf, weightsFor,
-  type InnovationType,
+  INNOVATION_TYPES, applyTypeSettings, describeTypeSettings, filterByType, typeCounts, typeOf,
+  typesOf, weightsFor, type InnovationType, type TypeOverrides,
 } from '../src/core/innovationTypes.js';
 import { parseMaramaCsv } from '../src/data/maramaCsv.js';
 import type { Dataset } from '../src/core/types.js';
@@ -308,5 +308,80 @@ describe('significance is not a correction for dataset size', () => {
     const base = fisherStrength({ a: 2, b: 0, c: 0, d: 2 }).strength;
     const padded = fisherStrength({ a: 2, b: 0, c: 0, d: 200 }).strength;
     expect(padded).toBeGreaterThan(base);
+  });
+});
+
+describe('explicit types from the editor', () => {
+  // The editor stores a row's type in its metadata. Before this was threaded
+  // through, a row retyped as ISC was displayed as ISC but filtered, weighted
+  // and counted by its label prefix.
+  const small: Dataset = {
+    languages: ['A', 'B', 'C', 'D'],
+    innovations: ['Lex: one', 'Lex: two', 'no prefix', 'ISC: four'],
+    matrix: [[1, 1, 0, 0], [0, 1, 1, 0], [0, 0, 1, 1], [1, 1, 1, 0]],
+  };
+  const overrides: TypeOverrides = ['ISC', undefined, 'Mrp', undefined];
+
+  it('prefers the explicit type and falls back to the label', () => {
+    expect(typesOf(small, overrides)).toEqual(['ISC', 'Lex', 'Mrp', 'ISC']);
+    expect(typesOf(small)).toEqual(['Lex', 'Lex', 'untyped', 'ISC']);
+  });
+
+  it('counts by the explicit type', () => {
+    const counts = typeCounts(small, overrides);
+    expect(counts.get('ISC')).toBe(2);
+    expect(counts.get('Lex')).toBe(1);
+    expect(counts.has('untyped')).toBe(false);
+  });
+
+  it('filters by the explicit type', () => {
+    const noLex = filterByType(small, all('Lex'), overrides);
+    expect(noLex.innovations).toEqual(['Lex: one', 'no prefix', 'ISC: four']);
+  });
+
+  it('weights by the explicit type', () => {
+    expect(Array.from(weightsFor(small, { ISC: 0.5 }, overrides)!)).toEqual([0.5, 1, 1, 0.5]);
+  });
+
+  it('keeps weights aligned with the rows that survive filtering', () => {
+    // Excluding Lex drops row 1 only; rows 0 and 3 are ISC, row 2 Mrp. If the
+    // weights were computed on the unfiltered rows they would be shifted.
+    const { dataset: kept, weights } = applyTypeSettings(
+      small, all('Lex'), { ISC: 0.5, Mrp: 2 }, overrides,
+    );
+    expect(kept.innovations).toEqual(['Lex: one', 'no prefix', 'ISC: four']);
+    expect(Array.from(weights!)).toEqual([0.5, 2, 0.5]);
+  });
+
+  it('matches filterByType + weightsFor when there are no overrides', () => {
+    const { dataset: kept, weights } = applyTypeSettings(dataset, all('Lex'), { ISC: 3 });
+    const filtered = filterByType(dataset, all('Lex'));
+    expect(kept).toEqual(filtered);
+    expect(weights).toEqual(weightsFor(filtered, { ISC: 3 }));
+  });
+});
+
+describe('describeTypeSettings', () => {
+  const present = new Map<InnovationType, number>([['Lex', 10], ['ISC', 4], ['untyped', 2]]);
+
+  it('says nothing about the defaults', () => {
+    expect(describeTypeSettings(present, undefined, undefined)).toEqual([]);
+    expect(describeTypeSettings(present, [...INNOVATION_TYPES], { Lex: 1 })).toEqual([]);
+  });
+
+  it('records the actual weights, not just that there are some', () => {
+    expect(describeTypeSettings(present, undefined, { Lex: 0.25, ISC: 2 }))
+      .toEqual(['weights ISC ×2, Lex ×0.25']);
+  });
+
+  it('records exclusions, and drops weights they make moot', () => {
+    const enabled = INNOVATION_TYPES.filter((t) => t !== 'Lex' && t !== 'untyped');
+    expect(describeTypeSettings(present, enabled, { Lex: 0.25, ISC: 2 }))
+      .toEqual(['excluding Lex, untyped', 'weights ISC ×2']);
+  });
+
+  it('ignores types absent from the data', () => {
+    const enabled = INNOVATION_TYPES.filter((t) => t !== 'Syn');
+    expect(describeTypeSettings(present, enabled, { RSC: 0 })).toEqual([]);
   });
 });

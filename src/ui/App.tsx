@@ -30,7 +30,8 @@ import {
 import { reconcile } from '../data/innovationMeta.js';
 import { linkageStages, stageAt } from '../core/chronology.js';
 import {
-  INNOVATION_TYPES, filterByType, typeCounts as countTypes, weightsFor,
+  INNOVATION_TYPES, applyTypeSettings, describeTypeSettings, typeCounts as countTypes,
+  type TypeOverrides,
 } from '../core/innovationTypes.js';
 
 const LAYOUT_LABELS: Record<LayoutKind, string> = {
@@ -118,6 +119,20 @@ export function App() {
   const dataset = project?.dataset ?? null;
   const settings = project?.settings ?? null;
 
+  const meta = useMemo(
+    () => reconcile(project?.innovationMeta, dataset?.innovations.length ?? 0),
+    [project?.innovationMeta, dataset?.innovations.length],
+  );
+
+  // Types set explicitly in the editor override the label prefix when
+  // filtering and weighting. Keyed on the types alone: metadata changes on
+  // every keystroke in a note, and that must not re-score and re-seriate.
+  const typeKey = meta.map((m) => m.type ?? '').join('|');
+  const typeOverrides = useMemo<TypeOverrides>(
+    () => meta.map((m) => m.type),
+    [typeKey],
+  );
+
   // Scored once per dataset + method settings; independent of threshold,
   // layout and manual edits, all of which only affect presentation.
   const scored = useMemo(() => {
@@ -125,12 +140,12 @@ export function App() {
     const enabled = new Set(settings.enabledTypes ?? INNOVATION_TYPES);
     // Filtering removes rows, so it can make a subgroup unattested rather than
     // merely weaker. That is the point of the control.
-    const filtered = filterByType(dataset, enabled);
-    const g = new Glottometry(
-      filtered, settings.policy, weightsFor(filtered, settings.typeWeights),
+    const { dataset: filtered, weights } = applyTypeSettings(
+      dataset, enabled, settings.typeWeights, typeOverrides,
     );
+    const g = new Glottometry(filtered, settings.policy, weights);
     return { g, dataset: filtered, subgroups: g.subgroups() };
-  }, [dataset, settings?.policy, settings?.enabledTypes, settings?.typeWeights]);
+  }, [dataset, settings?.policy, settings?.enabledTypes, settings?.typeWeights, typeOverrides]);
 
   const strengthOf = useCallback(
     (s: { sigma: number; epsilon: number; significance: number }) =>
@@ -327,19 +342,14 @@ export function App() {
         `${scored.dataset.innovations.length}/${dataset.innovations.length} innovations`,
       );
     }
-    if (settings.typeWeights && Object.values(settings.typeWeights).some((w) => w !== 1)) {
-      parts.push('type-weighted');
-    }
+    parts.push(...describeTypeSettings(
+      countTypes(dataset, typeOverrides), settings.enabledTypes, settings.typeWeights,
+    ));
     if (showFragmentation && stage) {
       parts.push(`${stage.components.length} connected components`);
     }
     return parts.join(' · ');
-  }, [settings, scored, dataset, visible.length, showFragmentation, stage]);
-
-  const meta = useMemo(
-    () => reconcile(project?.innovationMeta, dataset?.innovations.length ?? 0),
-    [project?.innovationMeta, dataset?.innovations.length],
-  );
+  }, [settings, scored, dataset, typeOverrides, visible.length, showFragmentation, stage]);
 
   const edit = useCallback(
     (fn: (p: Project) => Project, label: string, key?: string) =>
@@ -538,7 +548,7 @@ export function App() {
             <div style={S.leftColumn}>
               <SettingsPanel
                 settings={settings}
-                typeCounts={countTypes(dataset)}
+                typeCounts={countTypes(dataset, typeOverrides)}
                 kept={scored.dataset.innovations.length}
                 total={dataset.innovations.length}
                 onChange={setSettings}

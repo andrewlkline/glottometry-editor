@@ -195,6 +195,15 @@ The underlying arguments:
 - **Weighting by innovation type** — deliberately *not* done by K&F, and Pelkey
   (2015: 402) warns weighting "too easily becomes an outlet for comparativists
   to justify their own intuitions." If offered, it should be off by default.
+- **Where a row's type comes from.** A type set in the matrix editor (stored
+  in `innovationMeta[i].type`) overrides the label prefix (`Lex:`, `ISC:` …);
+  the prefix is only the fallback. Filtering, weighting and the type counts all
+  go through `applyTypeSettings`/`typesOf` with those overrides — they once
+  read the prefix alone, so a retyped row was shown as one type and scored as
+  another. The scorer is memoised on the types only, so editing a note does not
+  re-score or re-seriate. Exported captions spell out exclusions and weights
+  (`excluding Syn · weights ISC ×2, Lex ×0.25`), since "type-weighted" alone
+  cannot be reproduced.
 - **Relative chronology.** K&F recorded crucial orderings between innovations
   but never used them; only 19.4% of their innovations (92/474) participate in
   any ordering. Storing them is cheap and no existing tool does it.
