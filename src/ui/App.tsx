@@ -14,13 +14,14 @@ import { ImportReport, type ImportReportData } from './ImportReport.js';
 import { FormatGuide } from './FormatGuide.js';
 import { QualityLegend } from './QualityLegend.js';
 import { HypothesisLegend, HypothesisPanel } from './HypothesisPanel.js';
-import { analyseHypothesis } from '../core/hypothesis.js';
-import { hypothesisScene, hypothesisTreeScene } from '../render/hypothesisScene.js';
-import { buildTree, treeOrder } from '../core/tree.js';
+import { buildHypothesisView } from './hypothesisView.js';
+import { ComparePanel } from './ComparePanel.js';
+import { summarise } from '../core/compare.js';
+import { exportComparison } from '../render/exportComparison.js';
+import { downloadText } from '../data/templates.js';
 import {
   activeHypothesis, addGroup, addHypothesis, assignInnovation, duplicateHypothesis, removeGroup,
-  removeHypothesis, renameHypothesis, resolveAssignments, resolveGroups, setActiveHypothesis,
-  updateGroup,
+  removeHypothesis, renameHypothesis, setActiveHypothesis, updateGroup,
 } from '../data/hypothesis.js';
 import {
   createProject, downloadProject, parseProject, resolveOrder, type Project,
@@ -307,7 +308,7 @@ export function App() {
   );
 
   // --- Hypotheses -----------------------------------------------------------
-  const [view, setView] = useState<'computed' | 'hypothesis'>('computed');
+  const [view, setView] = useState<'computed' | 'hypothesis' | 'compare'>('computed');
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [highlightedGroup, setHighlightedGroup] = useState<string | null>(null);
   const hypothesis = project ? activeHypothesis(project) : null;
@@ -321,30 +322,26 @@ export function App() {
     [history],
   );
 
-  const resolvedHypothesis = useMemo(
-    () => (hypothesis && dataset ? resolveGroups(hypothesis, dataset.languages) : null),
-    [hypothesis, dataset],
-  );
+  // --- The active hypothesis, derived in one place ---------------------------
+  const [showTree, setShowTree] = useState(true);
+  const [listAtNodes, setListAtNodes] = useState(true);
 
-  /** The analyst's assignments, by row of the scored dataset. */
-  const resolvedAssignments = useMemo(() => {
-    if (!hypothesis || !scored || !dataset) return null;
-    return resolveAssignments(
-      hypothesis, scored.rows.map((r) => meta[r]?.id), dataset.languages,
-    );
-  }, [hypothesis, scored, dataset, meta]);
+  const activeView = useMemo(() => {
+    if (!hypothesis || !dataset || !scored || !settings) return null;
+    return buildHypothesisView({
+      hypothesis, dataset, scored, meta, layout, layoutKind: settings.layoutKind,
+      classOf: classOfScored, showTree, listAtNodes,
+    });
+  }, [hypothesis, dataset, scored, meta, layout, settings?.layoutKind, classOfScored,
+    showTree, listAtNodes]);
 
-  // Checked against the scored dataset, so the type filter decides what
-  // evidence counts here exactly as it does for the computed diagram.
-  const hypothesisAnalysis = useMemo(
-    () => (resolvedHypothesis && scored
-      ? analyseHypothesis(
-        scored.dataset, resolvedHypothesis.specs, classOfScored, layout?.order,
-        resolvedAssignments?.assignmentOf,
-      )
-      : null),
-    [resolvedHypothesis, scored, classOfScored, layout?.order, resolvedAssignments],
-  );
+  const resolvedHypothesis = activeView?.resolved ?? null;
+  const resolvedAssignments = activeView?.assignments ?? null;
+  const hypothesisAnalysis = activeView?.analysis ?? null;
+  const treeUnavailable = activeView?.treeUnavailable ?? null;
+  const hypothesisTreeDrawing = activeView?.isTree ? activeView.scene : null;
+  /** What the hypothesis view draws: the tree when there is one, else contours. */
+  const hypothesisView = activeView?.scene ?? null;
 
   /**
    * Explain an innovation (by original row) in the active hypothesis. Assigning
@@ -372,67 +369,57 @@ export function App() {
     [hypothesisEdit],
   );
 
-  const hypothesisDrawing = useMemo(() => {
-    if (!layout || !scored || !hypothesis || !resolvedHypothesis) return null;
-    const names = new Map(hypothesis.groups.map((g) => [g.id, g.name || g.members.join(' + ')]));
-    return hypothesisScene(layout, scored.g, resolvedHypothesis.specs, (id) => names.get(id) ?? id);
-  }, [layout, scored, hypothesis, resolvedHypothesis]);
-
   const showingHypothesis = view === 'hypothesis';
+  const comparing = view === 'compare';
 
-  // --- The tree drawing (chain layout only) ---------------------------------
-  const [showTree, setShowTree] = useState(true);
-  const [listAtNodes, setListAtNodes] = useState(true);
+  // --- Comparison -----------------------------------------------------------
+  const [comparePick, setComparePick] = useState<[string, string] | null>(null);
+  const hypothesesList = project?.hypotheses ?? [];
+  /** A and B: the user's pick if still valid, else the active one and the next. */
+  const [compareA, compareB] = useMemo(() => {
+    const ids = hypothesesList.map((h) => h.id);
+    if (comparePick && ids.includes(comparePick[0]) && ids.includes(comparePick[1])) {
+      return comparePick.map((id) => hypothesesList.find((h) => h.id === id)!);
+    }
+    const first = hypothesis ?? hypothesesList[0] ?? null;
+    const second = hypothesesList.find((h) => h.id !== first?.id) ?? null;
+    return [first, second];
+  }, [hypothesesList, comparePick, hypothesis]);
 
-  const hypothesisTree = useMemo(() => {
-    if (!resolvedHypothesis || !dataset || !hypothesisAnalysis) return null;
-    if (hypothesisAnalysis.conflicts.length > 0) return null;
-    if (!resolvedHypothesis.specs.some((s) => s.kind === 'subgroup' && s.members.length > 0)) return null;
-    return buildTree(resolvedHypothesis.specs, dataset.languages.length);
-  }, [resolvedHypothesis, dataset, hypothesisAnalysis]);
+  const buildView = useCallback((h: typeof hypothesis) => {
+    if (!h || !dataset || !scored || !settings) return null;
+    return buildHypothesisView({
+      hypothesis: h, dataset, scored, meta, layout, layoutKind: settings.layoutKind,
+      classOf: classOfScored, showTree, listAtNodes,
+    });
+  }, [dataset, scored, meta, layout, settings?.layoutKind, classOfScored, showTree, listAtNodes]);
 
-  /** Why the tree is not drawn, when it was asked for and the layout allows it. */
-  const treeUnavailable = !hypothesisAnalysis ? null
-    : hypothesisAnalysis.conflicts.length > 0 ? 'subgroups overlap without nesting'
-    : !hypothesisTree ? 'no subgroups yet'
-    : null;
+  const compareViewA = useMemo(() => (comparing ? buildView(compareA) : null), [comparing, buildView, compareA]);
+  const compareViewB = useMemo(() => (comparing ? buildView(compareB) : null), [comparing, buildView, compareB]);
 
-  const hypothesisTreeDrawing = useMemo(() => {
-    if (!showTree || settings?.layoutKind !== 'chain') return null;
-    if (!hypothesisTree || !layout || !scored || !dataset || !hypothesis || !resolvedHypothesis
-      || !hypothesisAnalysis) return null;
-    const specs = resolvedHypothesis.specs;
-    const order = treeOrder(
-      hypothesisTree, layout.order,
-      specs.filter((s) => s.kind !== 'subgroup').map((s) => s.members),
+  const exportComparisonSvg = () => {
+    if (!compareA || !compareB || !compareViewA?.scene || !compareViewB?.scene || !project || !settings) return;
+    const line = (v: NonNullable<typeof compareViewA>) => {
+      const s = summarise(v.analysis, v.resolved.specs, classOfScored);
+      return [
+        s.extraGains === null ? 'not a tree' : `${s.extraGains} extra origins`,
+        `${s.losses.recorded} losses recorded`,
+        `${s.explained.unexplained} of ${s.informative} unexplained`,
+        `high-quality: ${s.byQuality.high.inherited} inherited, ${s.byQuality.high.areal} areal`,
+      ].join(' · ');
+    };
+    const method = 'A hybrid hypothesis (subgroups, linkages, contact zones), '
+      + 'checked against a glottometric innovations matrix';
+    const svg = exportComparison(
+      [
+        { scene: compareViewA.scene, heading: `A: ${compareA.name}`, summary: line(compareViewA), options: { method } },
+        { scene: compareViewB.scene, heading: `B: ${compareB.name}`, summary: line(compareViewB), options: { method } },
+      ],
+      `Hypotheses compared — ${project.name}`,
+      `Two hypotheses over ${project.name}: authored, not computed; counts checked against the same matrix`,
     );
-    const treeLayout = chainLayout(order, dataset.languages);
-    const names = new Map(hypothesis.groups.map((g) => [g.id, g.name || g.members.join(' + ')]));
-    const reports = new Map(hypothesisAnalysis.groups.map((r) => [r.id, r]));
-    const lostSuffix = (lost: number[]) =>
-      (lost.length ? ` (lost in ${lost.map((l) => dataset.languages[l]).join(', ')})` : '');
-    const innovationsOf = (rows: { row: number; lost?: number[] }[]) => rows.map(({ row, lost }) => ({
-      label: scored.dataset.innovations[row]! + lostSuffix(lost ?? []), quality: classOfScored(row),
-    }));
-    const familyRows = hypothesisAnalysis.explanations
-      .flatMap((e, r) => (e.kind === 'family' ? [r] : []));
-    return hypothesisTreeScene(
-      treeLayout, scored.g, specs, (id) => names.get(id) ?? id, hypothesisTree,
-      (groupId) => {
-        if (groupId === null) {
-          return familyRows.length
-            ? { name: '', innovations: innovationsOf(familyRows.map((row) => ({ row }))) } : null;
-        }
-        const report = reports.get(groupId);
-        return { name: names.get(groupId) ?? '', innovations: innovationsOf(report?.credited ?? []) };
-      },
-      { listInnovations: listAtNodes },
-    );
-  }, [showTree, settings?.layoutKind, hypothesisTree, layout, scored, dataset, hypothesis,
-    resolvedHypothesis, hypothesisAnalysis, classOfScored, listAtNodes]);
-
-  /** What the hypothesis view draws: the tree when there is one, else contours. */
-  const hypothesisView = hypothesisTreeDrawing ?? hypothesisDrawing;
+    downloadText(`${project.name}-compare-${compareA.name}-${compareB.name}.svg`, svg, 'image/svg+xml');
+  };
 
   const hypothesisSubtitle = useMemo(() => {
     if (!hypothesis || !hypothesisAnalysis) return '';
@@ -657,7 +644,7 @@ export function App() {
           ))}
         </span>
         <span style={S.modes} title="Computed glottometry, or your authored hypothesis">
-          {(['computed', 'hypothesis'] as const).map((v) => (
+          {(['computed', 'hypothesis', 'compare'] as const).map((v) => (
             <button
               key={v}
               onClick={() => setView(v)}
@@ -667,7 +654,7 @@ export function App() {
             </button>
           ))}
         </span>
-        {showingHypothesis && settings.layoutKind === 'chain' && <>
+        {(showingHypothesis || comparing) && settings.layoutKind === 'chain' && <>
           <label style={S.toggle} title="Draw the subgroups as a tree beside the chain">
             <input type="checkbox" checked={showTree} onChange={(e) => setShowTree(e.target.checked)} />
             tree
@@ -683,7 +670,7 @@ export function App() {
             </label>
           )}
         </>}
-        {!showingHypothesis && <>
+        {!showingHypothesis && !comparing && <>
         <label style={S.toggle} title="Show the diagram's connected components">
           <input
             type="checkbox"
@@ -719,9 +706,12 @@ export function App() {
         <span style={S.spacer} />
         <button onClick={() => downloadProject(project)}>save project</button>
         <button
-          disabled={showingHypothesis ? !hypothesisView : !exportScene}
+          disabled={comparing ? !(compareViewA?.scene && compareViewB?.scene)
+            : showingHypothesis ? !hypothesisView : !exportScene}
           onClick={() => {
-            if (showingHypothesis) {
+            if (comparing) {
+              exportComparisonSvg();
+            } else if (showingHypothesis) {
               if (hypothesisView && hypothesis) {
                 downloadSvg(hypothesisView, `${project.name}-hypothesis-${hypothesis.name}`, {
                   title: `Hypothesis: ${hypothesis.name} — ${project.name}`,
@@ -790,7 +780,7 @@ export function App() {
                   : undefined}
             />
           )}
-          {!showingHypothesis && (showQuality || showSurvival) && mode === 'diagram' && (
+          {!showingHypothesis && !comparing && (showQuality || showSurvival) && mode === 'diagram' && (
             <QualityLegend
               lines={showQuality}
               survival={highOnly && {
@@ -871,6 +861,39 @@ export function App() {
                   reflexes, sources, and what it must have preceded.
                 </aside>
               )}
+            </div>
+          ) : comparing ? (
+            <div style={S.compareWorkspace}>
+              <div style={S.leftColumn}>
+                <SettingsPanel
+                  settings={settings}
+                  typeCounts={countTypes(dataset, typeOverrides)}
+                  kept={scored.dataset.innovations.length}
+                  total={dataset.innovations.length}
+                  onChange={setSettings}
+                />
+              </div>
+              <ComparePanel
+                hypotheses={hypothesesList}
+                a={compareA}
+                b={compareB}
+                viewA={compareViewA}
+                viewB={compareViewB}
+                onPick={(x, y) => setComparePick([x, y])}
+                scored={scored.dataset}
+                classOf={classOfScored}
+                onCopyActive={() => {
+                  if (hypothesesList.length === 0) {
+                    edit((p) => addHypothesis(p, 'hypothesis 1'), 'new hypothesis');
+                  } else {
+                    hypothesisEdit(
+                      (p, id) => duplicateHypothesis(p, id, `${activeHypothesis(p)!.name} (copy)`),
+                      'copy hypothesis',
+                    );
+                  }
+                }}
+                onExport={exportComparisonSvg}
+              />
             </div>
           ) : (
           <div style={S.workspace}>
@@ -1055,6 +1078,10 @@ const S: Record<string, React.CSSProperties> = {
     alignItems: 'start',
   },
   leftColumn: { display: 'flex', flexDirection: 'column', gap: '0.6rem' },
+  compareWorkspace: {
+    display: 'grid', gridTemplateColumns: 'minmax(210px, 260px) 1fr',
+    gap: '1rem', alignItems: 'start',
+  },
   dataWorkspace: {
     display: 'grid', gridTemplateColumns: '1fr minmax(260px, 340px)',
     gap: '1rem', alignItems: 'start',

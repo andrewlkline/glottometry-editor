@@ -517,6 +517,38 @@ every call and anything keyed by them — assignments, and the relative-chronolo
 orderings — was orphaned on reload. `createProject` now stores ids from the
 start, and the assign action persists the ids it keys by.
 
+### Comparing hypotheses
+
+The third switch position, **compare**, puts two hypotheses side by side
+(Kaufman 2026: 6–7: "hypotheses in competition"). Pick A and B (default: the
+active one and the next; ⇄ swaps). It shows:
+
+- **Counts** (`core/compare.ts`, `summarise`): groups by kind, extra origins,
+  losses recorded / not recorded, how the informative innovations are
+  explained (inherited / areal / unexplained), and the same for the
+  **high-quality** ones — Smith's (2025: 659) test is whether a subgroup rests
+  on them. The lower count is marked "fewer" only where that is worth pointing
+  out, and a line says outright that fewer origins is more parsimonious, not
+  more true.
+- **Both drawings**, trees included, from the same code as the single view.
+- **The innovations explained differently** (`differences`), filterable as
+  *inherited ↔ areal* (the (4)-vs-(5) question), *explained ↔ unexplained*, or
+  *different group or losses*, high-quality first. Hovering one marks the
+  languages that have it in both drawings.
+- **Export comparison SVG** (`render/exportComparison.ts`): each panel is the
+  ordinary standalone export nested as its own `<svg>`, with a heading and its
+  counts, so the figure cannot drift from what either hypothesis exports alone.
+
+Groups are matched **by members, not ids**: a copied hypothesis shares no ids
+with its original, but a subgroup left alone is the same claim and must not
+show as a difference. `tests/compare.test.ts` reproduces Kaufman's (4) vs (5):
+1 vs 2 extra origins, all three innovations flipping inherited ↔ areal.
+
+The single view and both panels come from one function,
+`ui/hypothesisView.ts` (`buildHypothesisView`), rather than a chain of hooks —
+a comparison computed differently from what each view shows would be worse
+than none.
+
 ### The fragmentation view
 
 Kalyan & François (2019: 171) define a glottometric diagram as a weighted
@@ -686,8 +718,11 @@ contour-engine design, phasing and risks.
       innovations at nodes; leaf order constrained to the tree.
 - [x] Hybrid phase 2b: per-innovation assignments and loss annotations,
       feeding the origins count, loss tally and node lists.
-- [ ] Hybrid phase 3: side-by-side comparison of hypotheses; an optional
-      starting tree from the strongest compatible computed subgroups.
+- [x] Hybrid phase 3: side-by-side comparison of hypotheses, with a combined
+      SVG export.
+- [ ] An optional starting tree built from the strongest mutually compatible
+      computed subgroups (max-weight nested family; must be labelled a
+      starting point, not a result).
 
 ## References
 
