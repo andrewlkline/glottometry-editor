@@ -166,6 +166,11 @@ export class Glottometry {
     };
   }
 
+  /** The multiplier a row's contributions carry: its type weight, or 1. */
+  rowWeight(row: number): number {
+    return this.weights ? this.weights[row]! : 1;
+  }
+
   /**
    * The three probabilities the metrics are built from, for one innovation.
    *
@@ -284,7 +289,11 @@ export function maskOf(members: number[], nLanguages: number): boolean[] {
  *
  * Weights mirror the metric definitions exactly, so `sum(exclusive.weight)`
  * is epsilon, `sum(supporting.weight)` is p, and `sum(conflicting.weight)` is
- * q. An innovation nested strictly inside the subgroup is irrelevant to
+ * q — type weights included, since the scorer includes them.
+ *
+ * `dataset` must be the dataset `g` scored: after filtering by type, row r of
+ * the scorer is not row r of the full dataset, and pairing the two shows the
+ * wrong innovation's label beside another's numbers. So a mismatch throws. An innovation nested strictly inside the subgroup is irrelevant to
  * cohesiveness (K&F 2018: 70 fn. 9) and appears in none of the three lists.
  */
 export function evidenceFor(
@@ -293,14 +302,21 @@ export function evidenceFor(
   mask: boolean[],
   minWeight = 0.005,
 ): SubgroupEvidence {
+  if (dataset.matrix.length !== g.nInnovations) {
+    throw new Error(
+      `evidenceFor: dataset has ${dataset.matrix.length} rows but the scorer has ` +
+        `${g.nInnovations}; pass the dataset that was scored.`,
+    );
+  }
   const evidence: SubgroupEvidence = { exclusive: [], supporting: [], conflicting: [] };
 
   for (let r = 0; r < g.nInnovations; r++) {
     const { allIn, noneIn, noneOut } = g.rowProbabilities(r, mask);
+    const multiplier = g.rowWeight(r);
 
-    const exclusive = allIn * noneOut;
-    const conflicting = (1 - allIn - noneIn) * (1 - noneOut);
-    const supporting = allIn;
+    const exclusive = multiplier * allIn * noneOut;
+    const conflicting = multiplier * (1 - allIn - noneIn) * (1 - noneOut);
+    const supporting = multiplier * allIn;
 
     const participants: number[] = [];
     const unknown: number[] = [];
@@ -310,7 +326,9 @@ export function evidenceFor(
       else if (row[c] === null || row[c] === undefined) unknown.push(c);
     }
 
-    const base = { index: r, label: dataset.innovations[r] ?? `row ${r}`, participants, unknown };
+    const base = {
+      index: r, label: dataset.innovations[r] ?? `row ${r}`, participants, unknown, multiplier,
+    };
 
     if (exclusive > minWeight) {
       evidence.exclusive.push({ ...base, role: 'exclusive', weight: exclusive });

@@ -24,6 +24,7 @@
  */
 
 import type { InnovationType } from '../core/innovationTypes.js';
+import type { Correspondences, LexicalStatus, Quality } from '../core/quality.js';
 
 export interface InnovationMeta {
   /**
@@ -41,6 +42,16 @@ export interface InnovationMeta {
    * explicit, so it no longer depends on the label staying well-formed.
    */
   type?: InnovationType;
+  /**
+   * Smith's (2025) replacement / non-replacement distinction, for lexical
+   * innovations. Overrides a status letter in the label prefix (`Lex-R:`).
+   * See `core/quality.ts` for how it becomes a quality judgement.
+   */
+  lexicalStatus?: LexicalStatus;
+  /** Whether the reflexes correspond regularly; irregular suggests a loan. */
+  correspondences?: Correspondences;
+  /** An explicit quality judgement, overriding anything derived. */
+  quality?: Quality;
   protoForm?: string;
   innovatedForm?: string;
   gloss?: string;
@@ -73,7 +84,8 @@ export function emptyMeta(): InnovationMeta {
 
 /** True when nothing but the id is set, so the row carries no reasoning. */
 export function isBlank(meta: InnovationMeta): boolean {
-  return !meta.type && !meta.protoForm && !meta.innovatedForm && !meta.gloss
+  return !meta.type && !meta.lexicalStatus && !meta.correspondences && !meta.quality
+    && !meta.protoForm && !meta.innovatedForm && !meta.gloss
     && !meta.notes
     && !meta.sources?.length
     && !meta.precedes?.length

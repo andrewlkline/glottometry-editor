@@ -3,6 +3,11 @@ import {
   INNOVATION_TYPES, TYPE_LABELS, typeOf, type InnovationType,
 } from '../core/innovationTypes.js';
 import type { InnovationMeta } from '../data/innovationMeta.js';
+import {
+  LEXICAL_STATUSES, LEXICAL_STATUS_HELP, LEXICAL_STATUS_LABELS, assessQuality, labelQuality,
+  type Correspondences, type LexicalStatus, type Quality,
+} from '../core/quality.js';
+import { QUALITY_COLOUR, QualityMark } from './QualityMark.js';
 
 export interface InnovationDetailProps {
   dataset: Dataset;
@@ -71,6 +76,8 @@ export function InnovationDetail({
           stops depending on the label staying well-formed.
         </p>
       )}
+
+      <QualitySection label={label} type={type} current={current} onUpdate={onUpdate} />
 
       <div style={S.pair}>
         <label style={S.field}>
@@ -193,7 +200,100 @@ export function InnovationDetail({
   );
 }
 
+/**
+ * Quality, kept apart from type: Smith's (2025) replacement distinction lives
+ * inside the lexical type, and correspondences apply to any reflex set. The
+ * judgement line shows what the fields add up to, and why.
+ */
+function QualitySection({ label, type, current, onUpdate }: {
+  label: string;
+  type: InnovationType;
+  current: InnovationMeta;
+  onUpdate: (changes: Partial<InnovationMeta>) => void;
+}) {
+  const judgement = assessQuality(label, { ...current, type });
+  // What the fields would give without an explicit override, for the
+  // "derived" option's label.
+  const derived = assessQuality(label, { ...current, type, quality: undefined });
+  const fromLabel = labelQuality(label);
+  const status = current.lexicalStatus ?? (type === 'Lex' ? fromLabel.lexicalStatus : undefined);
+
+  return (
+    <fieldset style={S.group}>
+      <legend style={S.legend}>quality</legend>
+
+      <div style={S.judgement}>
+        <QualityMark judgement={judgement} />
+        <strong style={{ color: QUALITY_COLOUR[judgement.quality] }}>{judgement.quality}</strong>
+        <span style={S.reason}>— {judgement.reason}</span>
+      </div>
+
+      {type === 'Lex' && (
+        <label style={S.field}>
+          <span style={S.labelText}>lexical status</span>
+          <select
+            value={current.lexicalStatus ?? ''}
+            onChange={(e) => onUpdate({
+              lexicalStatus: (e.target.value || undefined) as LexicalStatus | undefined,
+            })}
+            style={S.input}
+          >
+            <option value="">
+              {fromLabel.lexicalStatus
+                ? `from label: ${LEXICAL_STATUS_LABELS[fromLabel.lexicalStatus]}`
+                : 'not recorded'}
+            </option>
+            {LEXICAL_STATUSES.map((st) => (
+              <option key={st} value={st} title={LEXICAL_STATUS_HELP[st]}>
+                {LEXICAL_STATUS_LABELS[st]}
+              </option>
+            ))}
+          </select>
+          {status && <span style={S.hint}>{LEXICAL_STATUS_HELP[status]}</span>}
+        </label>
+      )}
+
+      <label style={S.field}>
+        <span style={S.labelText}>sound correspondences</span>
+        <select
+          value={current.correspondences ?? ''}
+          onChange={(e) => onUpdate({
+            correspondences: (e.target.value || undefined) as Correspondences | undefined,
+          })}
+          style={S.input}
+        >
+          <option value="">not checked</option>
+          <option value="regular">regular</option>
+          <option value="irregular">irregular — suggests a loan</option>
+        </select>
+      </label>
+
+      <label style={S.field}>
+        <span style={S.labelText}>judgement</span>
+        <select
+          value={current.quality ?? ''}
+          onChange={(e) => onUpdate({ quality: (e.target.value || undefined) as Quality | undefined })}
+          style={S.input}
+        >
+          <option value="">derived: {derived.quality} ({derived.reason})</option>
+          <option value="high">high</option>
+          <option value="low">low</option>
+        </select>
+      </label>
+      {type !== 'Lex' && !current.quality && !fromLabel.quality && (
+        <p style={S.hint}>
+          Nothing is inferred from the type: a natural sound change can recur
+          independently, an idiosyncratic one rarely does (Kaufman 2026: 3). Set a
+          judgement if you have one.
+        </p>
+      )}
+    </fieldset>
+  );
+}
+
 const S: Record<string, React.CSSProperties> = {
+  judgement: { display: 'flex', gap: '0.3rem', alignItems: 'baseline', fontSize: '0.74rem' },
+  reason: { color: '#777' },
   panel: {
     border: '1px solid #ddd', borderRadius: 6, padding: '0.7rem',
     fontSize: '0.78rem', background: '#fff', maxHeight: 640, overflowY: 'auto',

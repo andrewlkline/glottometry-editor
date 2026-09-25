@@ -62,13 +62,20 @@ export interface EvidenceItem {
   label: string;
   role: EvidenceRole;
   /**
-   * How strongly this innovation plays the role, in [0, 1].
+   * How strongly this innovation plays the role: in [0, 1] times `multiplier`.
    *
-   * 1 when every relevant cell is known. Unknown cells make it fractional,
-   * for the same reason they make epsilon fractional: the counts are
-   * expectations under the NA policy, not certainties.
+   * 1 when every relevant cell is known and the row is unweighted. Unknown
+   * cells make it fractional, for the same reason they make epsilon
+   * fractional: the counts are expectations under the NA policy, not
+   * certainties.
    */
   weight: number;
+  /**
+   * The type weight included in `weight`; 1 when unweighted. Kept separately
+   * so the inspector can tell "fractional because of unknown cells" apart from
+   * "scaled by a type weight".
+   */
+  multiplier: number;
   /** Language indices with a definite 1. */
   participants: number[];
   /** Language indices whose cell is unknown. */

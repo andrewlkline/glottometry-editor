@@ -274,3 +274,21 @@ describe('coordinates template', () => {
     expect(find(issues, /no coordinates filled in/).examples).toEqual(['Beri, upper']);
   });
 });
+
+describe('quality modifiers in label prefixes', () => {
+  it('accepts well-formed ones silently', () => {
+    const { issues } = checkInnovationsCsv(
+      ',A,B,C\nLex-R: x,1,1,0\nLex-S-: y,0,1,1\nISC+: z,1,0,1\n',
+    );
+    expect(issues).toEqual([]);
+  });
+
+  it('warns about a status letter it cannot use', () => {
+    const { value, issues } = checkInnovationsCsv(
+      ',A,B,C\nLex-X: x,1,1,0\nISC-R: y,0,1,1\nLex: z,1,0,1\n',
+    );
+    expect(value).not.toBeNull();
+    expect(find(issues, /unrecognised status letter/).examples).toEqual(["A2: 'Lex-X:'"]);
+    expect(find(issues, /type other than Lex/).examples).toEqual(["A3: 'ISC-R:'"]);
+  });
+});

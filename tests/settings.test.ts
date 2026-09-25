@@ -353,6 +353,11 @@ describe('explicit types from the editor', () => {
     expect(Array.from(weights!)).toEqual([0.5, 2, 0.5]);
   });
 
+  it('reports which original rows survived, for looking up their metadata', () => {
+    const { rows } = applyTypeSettings(small, all('Lex'), undefined, overrides);
+    expect(rows).toEqual([0, 2, 3]);
+  });
+
   it('matches filterByType + weightsFor when there are no overrides', () => {
     const { dataset: kept, weights } = applyTypeSettings(dataset, all('Lex'), { ISC: 3 });
     const filtered = filterByType(dataset, all('Lex'));

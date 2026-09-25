@@ -253,7 +253,7 @@ shebang resolves to the old v14.
 ### Layout
 
 ```
-src/core/        metrics, candidates, seriation, layouts, MDS — pure, no DOM
+src/core/        metrics, candidates, seriation, layouts, MDS, types, quality — pure, no DOM
 src/geometry/    tracks, capsule (chain contours), blob + marchingSquares (2-D)
 src/render/      scene, Diagram.tsx, styles, exportSvg
 src/data/        Marama CSV import/export; csv.ts tokeniser, csvCheck.ts validation, templates
@@ -269,8 +269,40 @@ Click a contour and the panel lists the innovations behind its score, split
 three ways: **exclusive** (their weights sum to ε), **supporting** (to p) and
 **conflicting** (to q), each shown with its distribution across the family.
 `tests/evidence.test.ts` asserts those sums match the metrics to 1e-9 under
-every NA policy — otherwise the panel would be explaining a number the diagram
-is not drawing.
+every NA policy and with type weights — otherwise the panel would be explaining
+a number the diagram is not drawing.
+
+**It must be given the dataset that was scored**, i.e. after type filtering.
+Row r of a filtered scorer is not row r of the full dataset; the panel was once
+handed the full one, and with a type excluded it showed one innovation's label
+beside another's numbers. `evidenceFor` now throws on a row-count mismatch, and
+anything keyed by original rows (metadata, quality) goes through the `rows`
+map that `applyTypeSettings` returns.
+
+### Innovation quality
+
+A second axis beside type, after Smith (2025: 659–662): how safely a row can be
+read as inherited rather than borrowed. Recorded per row (detail pane, or label
+prefix), shown in the grid (● high, ○ low, – undetermined; filterable, with an
+"assessed n/N" count) and in the evidence panel, which splits the current total
+by class (`ε 5.00 = 2.00 high + 0.50 low + 2.50 undetermined`). **It does not
+affect scoring** — how quality should enter the diagram is a separate decision.
+
+- **Fields:** lexical status (replacement / synonymic / novel concept /
+  indeterminate — Smith's ex. 5 and fn. 4, meaningful for Lex only), sound
+  correspondences (regular / irregular), and an explicit high/low judgement.
+- **Precedence** (`core/quality.ts`): explicit judgement → irregular
+  correspondences (low: a borrowed replacement is still a loan) → lexical
+  status. Metadata overrides the label prefix.
+- **Nothing is inferred from type.** Smith ranks sound change highest, Kaufman
+  (2026: 3) notes natural changes recur independently, K&F rank irregular above
+  regular. Non-lexical rows stay "undetermined" until judged.
+- **Not recorded:** Smith's universality and exclusivity criteria. Those are
+  relations to a candidate subgroup, which ε/p/q already compute.
+- **CSV:** `Lex-R:` `Lex-S:` `Lex-N:` `Lex-I:` for status; `+`/`-` before the
+  colon for a judgement on any type (`ISC+:`, `Lex-S-:`). K&F's analyzer treats
+  labels as text, so such files still load there. The checker warns about a
+  status letter on a non-Lex type or an unknown letter.
 
 This is the question a comparativist actually has, and no existing tool answers
 it. The Marama engine returns totals; the published tables stop at ε, κ and ς.
@@ -499,7 +531,13 @@ contour-engine design, phasing and risks.
       that are not any innovation's exact pattern — by some means unknown.
 - [ ] No contact with Kalyan/François. They invite it ("feel free to contact
       us"), and they would be the natural first users and reviewers.
-- [x] Under git. No remote yet.
+- [x] On GitHub (`andrewlkline/glottometry-editor`), deployed to Pages.
+- [x] Innovation quality recorded and shown (not yet used in the diagram).
+- [ ] Quality in the diagram: solid vs dashed contours by whether any
+      high-quality exclusive innovation supports a group, and a "survival"
+      overlay fading groups that vanish on high-quality evidence alone.
+- [ ] Hybrid tree + linkage + contact-zone hypotheses over the same matrix
+      (see the discussion of Kaufman 2026 / Edwards 2021); needs the above.
 
 ## References
 

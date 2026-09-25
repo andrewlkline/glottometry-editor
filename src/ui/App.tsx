@@ -28,6 +28,7 @@ import {
   renameInnovation, renameLanguage, setRow, updateMeta,
 } from '../data/edit.js';
 import { reconcile } from '../data/innovationMeta.js';
+import { assessQuality } from '../core/quality.js';
 import { linkageStages, stageAt } from '../core/chronology.js';
 import {
   INNOVATION_TYPES, applyTypeSettings, describeTypeSettings, typeCounts as countTypes,
@@ -124,6 +125,13 @@ export function App() {
     [project?.innovationMeta, dataset?.innovations.length],
   );
 
+  // Recomputed on every metadata edit, which is fine: it is a pass over the
+  // rows, and nothing downstream of scoring depends on it.
+  const qualities = useMemo(
+    () => (dataset ? dataset.innovations.map((l, i) => assessQuality(l, meta[i])) : []),
+    [dataset, meta],
+  );
+
   // Types set explicitly in the editor override the label prefix when
   // filtering and weighting. Keyed on the types alone: metadata changes on
   // every keystroke in a note, and that must not re-score and re-seriate.
@@ -140,11 +148,11 @@ export function App() {
     const enabled = new Set(settings.enabledTypes ?? INNOVATION_TYPES);
     // Filtering removes rows, so it can make a subgroup unattested rather than
     // merely weaker. That is the point of the control.
-    const { dataset: filtered, weights } = applyTypeSettings(
+    const { dataset: filtered, weights, rows } = applyTypeSettings(
       dataset, enabled, settings.typeWeights, typeOverrides,
     );
     const g = new Glottometry(filtered, settings.policy, weights);
-    return { g, dataset: filtered, subgroups: g.subgroups() };
+    return { g, dataset: filtered, rows, subgroups: g.subgroups() };
   }, [dataset, settings?.policy, settings?.enabledTypes, settings?.typeWeights, typeOverrides]);
 
   const strengthOf = useCallback(
@@ -494,6 +502,7 @@ export function App() {
               <MatrixEditor
                 dataset={dataset}
                 meta={meta}
+                qualities={qualities}
                 selected={editingRow}
                 onSelect={setEditingRow}
                 onCycleCell={(row, column) => edit(
@@ -602,7 +611,8 @@ export function App() {
             ) : selectedSubgroup && scored ? (
               <EvidencePanel
                 glottometry={scored.g}
-                dataset={dataset}
+                dataset={scored.dataset}
+                qualityOf={(r) => qualities[scored.rows[r]!]}
                 subgroup={selectedSubgroup}
                 onClose={() => setSelected(null)}
               />

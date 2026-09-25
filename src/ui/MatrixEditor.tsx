@@ -4,6 +4,10 @@ import {
   INNOVATION_TYPES, TYPE_LABELS, resolveType, type InnovationType,
 } from '../core/innovationTypes.js';
 import type { InnovationMeta } from '../data/innovationMeta.js';
+import {
+  QUALITY_CLASSES, qualityCounts, type QualityClass, type QualityJudgement,
+} from '../core/quality.js';
+import { QualityMark } from './QualityMark.js';
 
 export interface MatrixEditorProps {
   dataset: Dataset;
@@ -17,6 +21,8 @@ export interface MatrixEditorProps {
   onAddLanguage: () => void;
   onRenameLanguage: (column: number, label: string) => void;
   onRemoveLanguage: (column: number) => void;
+  /** Each row's quality judgement, aligned with `dataset.innovations`. */
+  qualities: QualityJudgement[];
 }
 
 const ROW_HEIGHT = 24;
@@ -38,10 +44,12 @@ export function effectiveType(label: string, meta: InnovationMeta | undefined): 
 export function MatrixEditor({
   dataset, meta, selected, onSelect, onCycleCell, onSetRow,
   onAddInnovation, onRemoveInnovation, onAddLanguage, onRenameLanguage,
-  onRemoveLanguage,
+  onRemoveLanguage, qualities,
 }: MatrixEditorProps) {
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<InnovationType | 'all'>('all');
+  const [qualityFilter, setQualityFilter] = useState<QualityClass | 'all'>('all');
+  const counts = useMemo(() => qualityCounts(qualities), [qualities]);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(560);
   const viewport = useRef<HTMLDivElement>(null);
@@ -54,11 +62,12 @@ export function MatrixEditor({
     for (let i = 0; i < dataset.innovations.length; i++) {
       const label = dataset.innovations[i]!;
       if (typeFilter !== 'all' && effectiveType(label, meta[i]) !== typeFilter) continue;
+      if (qualityFilter !== 'all' && qualities[i]?.quality !== qualityFilter) continue;
       if (needle && !label.toLowerCase().includes(needle)) continue;
       out.push(i);
     }
     return out;
-  }, [dataset.innovations, meta, query, typeFilter]);
+  }, [dataset.innovations, meta, qualities, query, typeFilter, qualityFilter]);
 
   const first = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
   const visibleCount = Math.ceil(viewportHeight / ROW_HEIGHT) + OVERSCAN * 2;
@@ -83,10 +92,24 @@ export function MatrixEditor({
             <option key={t} value={t}>{TYPE_LABELS[t]}</option>
           ))}
         </select>
+        <select
+          value={qualityFilter}
+          onChange={(e) => setQualityFilter(e.target.value as QualityClass | 'all')}
+          style={S.select}
+          aria-label="filter by quality"
+        >
+          <option value="all">any quality</option>
+          {QUALITY_CLASSES.map((q) => (
+            <option key={q} value={q}>{q} ({counts[q]})</option>
+          ))}
+        </select>
         <span style={S.count}>
           {rows.length === dataset.innovations.length
             ? `${rows.length} innovations`
             : `${rows.length} of ${dataset.innovations.length}`}
+        </span>
+        <span style={S.count} title="Quality judgements recorded so far">
+          quality assessed: {counts.high + counts.low}/{qualities.length}
         </span>
         <span style={S.spacer} />
         <button onClick={onAddInnovation}>+ innovation</button>
@@ -130,6 +153,7 @@ export function MatrixEditor({
                   label={dataset.innovations[row]!}
                   cells={dataset.matrix[row]!}
                   type={effectiveType(dataset.innovations[row]!, meta[row])}
+                  quality={qualities[row]}
                   selected={selected === row}
                   onSelect={() => onSelect(selected === row ? null : row)}
                   onCycleCell={(column) => onCycleCell(row, column)}
@@ -147,9 +171,10 @@ export function MatrixEditor({
 }
 
 function Row({
-  row, label, cells, type, selected, onSelect, onCycleCell, onFill, onRemove,
+  row, label, cells, type, quality, selected, onSelect, onCycleCell, onFill, onRemove,
 }: {
   row: number; label: string; cells: Cell[]; type: InnovationType;
+  quality: QualityJudgement | undefined;
   selected: boolean; onSelect: () => void;
   onCycleCell: (column: number) => void;
   onFill: (value: Cell) => void;
@@ -163,6 +188,7 @@ function Row({
         title={`${label}\n${TYPE_LABELS[type]}`}
       >
         <span style={S.typeTag}>{type === 'untyped' ? '—' : type}</span>
+        {quality && <QualityMark judgement={quality} />}
         <span style={S.labelText}>{label}</span>
       </button>
 

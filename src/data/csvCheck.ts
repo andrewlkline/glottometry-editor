@@ -17,6 +17,8 @@
 
 import type { Cell, Dataset } from '../core/types.js';
 import type { LanguageCoordinates } from './maramaCsv.js';
+import { splitPrefix, typeOf } from '../core/innovationTypes.js';
+import { STATUS_LETTERS } from '../core/quality.js';
 import { columnLetter, tokenize, trimTrailing, type Delimiter, type Tokenized } from './csv.js';
 
 export type Severity = 'error' | 'warning' | 'info';
@@ -227,6 +229,8 @@ export function checkInnovationsCsv(text: string): CheckResult<Dataset> {
   const unlabelled: string[] = [];
   const labelRows = new Map<string, number[]>();
   const noOnes: string[] = [];
+  const statusOffLex: string[] = [];
+  const unknownStatus: string[] = [];
   const allOnes: string[] = [];
   const onesPerLanguage = new Array<number>(languages.length).fill(0);
   const knownPerLanguage = new Array<number>(languages.length).fill(0);
@@ -249,6 +253,13 @@ export function checkInnovationsCsv(text: string): CheckResult<Dataset> {
 
     if (!label) unlabelled.push(`A${row}`);
     else labelRows.set(label, [...(labelRows.get(label) ?? []), row]);
+
+    const prefix = splitPrefix(label);
+    if (prefix?.status) {
+      const where = `A${row}: ${show(label.slice(0, label.indexOf(':') + 1), 16)}`;
+      if (typeOf(label) !== 'Lex') statusOffLex.push(where);
+      else if (!STATUS_LETTERS[prefix.status]) unknownStatus.push(where);
+    }
 
     const cells: Cell[] = new Array(languages.length);
     let ones = 0;
@@ -308,6 +319,20 @@ export function checkInnovationsCsv(text: string): CheckResult<Dataset> {
     issues, 'warning', tooShort,
     (n) => `${n} ${plural(n, 'row is', 'rows are')} shorter than the header; the missing cells are read as unknown.`,
     'If those languages lack the innovation, put 0 in their cells: blank means "unknown".',
+  );
+
+  aggregate(
+    issues, 'warning', unknownStatus,
+    (n) => `${n} lexical ${plural(n, 'prefix has', 'prefixes have')} an unrecognised status letter.`,
+    'After Lex- use R (replacement), S (synonymic), N (novel concept) or I (indeterminate). ' +
+      'The letter is ignored, so the row reads as plain Lex.',
+  );
+
+  aggregate(
+    issues, 'warning', statusOffLex,
+    (n) => `${n} ${plural(n, 'prefix has', 'prefixes have')} a status letter on a type other than Lex.`,
+    'Replacement status (-R, -S, -N, -I) only applies to lexical innovations, so it is ignored ' +
+      'here. To mark the quality of any innovation, end the prefix with + or - instead: ISC+:',
   );
 
   aggregate(

@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Glottometry, evidenceFor, maskOf } from '../src/core/metrics.js';
 import { parseMaramaCsv } from '../src/data/maramaCsv.js';
+import { INNOVATION_TYPES, applyTypeSettings } from '../src/core/innovationTypes.js';
 import type { Dataset, NaPolicy } from '../src/core/types.js';
 
 const dataset = parseMaramaCsv(
@@ -136,5 +137,39 @@ describe('minWeight', () => {
     const trimmed = evidenceFor(g, dataset, mask);
     expect(trimmed.conflicting.length).toBeLessThanOrEqual(all.conflicting.length);
     expect(trimmed.conflicting.every((e) => e.weight > 0.005)).toBe(true);
+  });
+});
+
+describe('evidence under type filtering and weighting', () => {
+  const ds = {
+    languages: ['A', 'B', 'C', 'D'],
+    innovations: ['Lex: one', 'ISC: two', 'Lex: three', 'ISC: four'],
+    matrix: [[1, 1, 0, 0], [1, 1, 0, 0], [0, 1, 1, 0], [1, 1, 1, 0]] as (0 | 1 | null)[][],
+  };
+
+  it('refuses a dataset other than the one scored', () => {
+    // After filtering, scorer row r is not dataset row r; pairing them put
+    // one innovation's label beside another's numbers.
+    const { dataset: kept } = applyTypeSettings(ds, new Set(['ISC'] as const), undefined);
+    const g = new Glottometry(kept, 'half');
+    expect(() => evidenceFor(g, ds, maskOf([0, 1], 4))).toThrow(/dataset that was scored/);
+    const e = evidenceFor(g, kept, maskOf([0, 1], 4));
+    expect(e.exclusive.map((i) => i.label)).toEqual(['ISC: two']);
+  });
+
+  it('includes type weights, so the totals still equal the metrics', () => {
+    const { dataset: kept, weights } = applyTypeSettings(
+      ds, new Set(INNOVATION_TYPES), { Lex: 0.25, ISC: 2 },
+    );
+    const g = new Glottometry(kept, 'half', weights);
+    const mask = maskOf([0, 1], 4);
+    const e = evidenceFor(g, kept, mask, 0);
+    const stats = g.stats(mask);
+    const sum = (xs: { weight: number }[]) => xs.reduce((a, x) => a + x.weight, 0);
+    expect(sum(e.exclusive)).toBeCloseTo(stats.epsilon, 9);
+    expect(sum(e.supporting)).toBeCloseTo(stats.p, 9);
+    expect(sum(e.conflicting)).toBeCloseTo(stats.q, 9);
+    expect(e.exclusive.map((i) => [i.label, i.multiplier]))
+      .toEqual([['ISC: two', 2], ['Lex: one', 0.25]]);
   });
 });

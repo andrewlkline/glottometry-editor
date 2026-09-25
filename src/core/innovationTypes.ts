@@ -55,12 +55,42 @@ const ALIASES: Record<string, InnovationType> = {
   lex: 'Lex', lexical: 'Lex',
 };
 
+/**
+ * A label prefix, split into its parts: `Lex-R+:` is type `Lex`, lexical
+ * status `R`, quality mark `+`.
+ *
+ * The modifiers carry innovation quality (see `quality.ts`) through the CSV,
+ * which has no other channel for it: an extra column would be read as a
+ * language. K&F's analyzer treats the label as opaque text, so files using
+ * them still load there.
+ */
+const PREFIX = /^([A-Za-z]+)(?:-([A-Za-z]))?([+-])?$/;
+
+export interface LabelPrefix {
+  /** The type part as written, e.g. `Lex`, `Sytx`. */
+  base: string;
+  /** A single status letter after a hyphen, uppercased. */
+  status?: string;
+  mark?: '+' | '-';
+}
+
+export function splitPrefix(label: string): LabelPrefix | null {
+  const colon = label.indexOf(':');
+  if (colon <= 0) return null;
+  const m = PREFIX.exec(label.slice(0, colon).trim());
+  if (!m) return null;
+  return {
+    base: m[1]!,
+    status: m[2]?.toUpperCase(),
+    mark: m[3] as '+' | '-' | undefined,
+  };
+}
+
 /** Read the type from an innovation label's prefix. */
 export function typeOf(label: string): InnovationType {
-  const colon = label.indexOf(':');
-  if (colon <= 0) return 'untyped';
-  const prefix = label.slice(0, colon).trim().toLowerCase();
-  return ALIASES[prefix] ?? 'untyped';
+  const prefix = splitPrefix(label);
+  if (!prefix) return 'untyped';
+  return ALIASES[prefix.base.toLowerCase()] ?? 'untyped';
 }
 
 /**
@@ -153,6 +183,9 @@ export function weightsFor(
 /**
  * Filter and weight in one step, which is what the scorer needs.
  *
+ * `rows[i]` is the full dataset's index for filtered row i: anything keyed by
+ * the original rows, such as innovation metadata, is looked up through it.
+ *
  * Doing them separately would mean re-aligning the overrides with the
  * filtered rows, and a misalignment there would weight the wrong innovations
  * without any visible symptom.
@@ -162,12 +195,13 @@ export function applyTypeSettings(
   enabled: ReadonlySet<InnovationType>,
   typeWeights: Partial<Record<InnovationType, number>> | undefined,
   overrides?: TypeOverrides,
-): { dataset: Dataset; weights: Float64Array | null } {
+): { dataset: Dataset; weights: Float64Array | null; rows: number[] } {
   const types = typesOf(dataset, overrides);
   const keep = keptRows(types, enabled);
   return {
     dataset: selectRows(dataset, keep),
     weights: weightsFromTypes(keep.map((i) => types[i]!), typeWeights),
+    rows: keep,
   };
 }
 

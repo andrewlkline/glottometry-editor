@@ -36,7 +36,7 @@ export function FormatGuide({ languages, coordinates, onClose }: {
                 {['Lang A', 'Lang B', 'Lang C', 'Lang D'].map((l) => <th key={l} style={S.th}>{l}</th>)}
               </tr>
               {([
-                ["Lex: 'water': *wai → *vai", '1', '1', '0', '0'],
+                ["Lex-R: 'water': *wai → *vai", '1', '1', '0', '0'],
                 ['ISC: bite: *kaRat → *kat', '1', '1', '1', '0'],
                 ['Mrp: 1sg: *au → *nau', '0', '1', '1', ''],
               ] as const).map(([label, ...cells]) => (
@@ -60,6 +60,12 @@ export function FormatGuide({ languages, coordinates, onClose }: {
             <li>
               An optional prefix types the innovation: <code>Lex:</code> <code>ISC:</code>{' '}
               <code>RSC:</code> <code>Mrp:</code> <code>Syn:</code>. Anything else counts as untyped.
+            </li>
+            <li>
+              Optionally, quality: <code>Lex-R:</code> replacement, <code>Lex-S:</code> synonymic,{' '}
+              <code>Lex-N:</code> novel concept, <code>Lex-I:</code> indeterminate (Smith 2025);
+              and <code>+</code> or <code>-</code> before the colon for a high or low judgement on
+              any type (<code>ISC+:</code>). All of this can be set in the editor instead.
             </li>
             <li>Labels containing commas must be quoted. Spreadsheets do this for you when saving.</li>
           </ul>

@@ -2,10 +2,11 @@
  * Starter files for the two CSV formats.
  *
  * The innovations template is a worked example rather than an empty grid: it
- * shows a type prefix, an unknown cell, and a label that needs quoting, which
- * are the three things people get wrong. The coordinates template is built
- * from the loaded dataset, so the one hard constraint — names matching the
- * innovations header exactly — is satisfied before anyone types anything.
+ * shows a type prefix (one with a quality modifier), an unknown cell, and a
+ * label that needs quoting, which are the things people get wrong. The
+ * coordinates template is built from the loaded dataset, so the one hard
+ * constraint — names matching the innovations header exactly — is satisfied
+ * before anyone types anything.
  */
 
 import { toMaramaCsv } from './maramaCsv.js';
@@ -13,7 +14,7 @@ import { toMaramaCsv } from './maramaCsv.js';
 export const INNOVATIONS_TEMPLATE = toMaramaCsv({
   languages: ['Lang A', 'Lang B', 'Lang C', 'Lang D', 'Lang E'],
   innovations: [
-    "Lex: 'water': *wai → *vai",
+    "Lex-R: 'water': *wai → *vai",
     'ISC: bite: *kaRat → *kat',
     'Mrp: 1sg: *au → *nau',
     "Lex: 'eye, face': *mata → *nako",

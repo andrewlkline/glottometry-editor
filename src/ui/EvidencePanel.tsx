@@ -1,13 +1,20 @@
 import { useMemo, useState } from 'react';
 import { evidenceFor, maskOf, type Glottometry } from '../core/metrics.js';
 import type { Dataset, EvidenceItem, Subgroup } from '../core/types.js';
+import { QUALITY_CLASSES, type QualityClass, type QualityJudgement } from '../core/quality.js';
+import { QUALITY_COLOUR, QualityMark } from './QualityMark.js';
 
 export interface EvidencePanelProps {
   glottometry: Glottometry;
+  /** The dataset `glottometry` scored — after type filtering, not before. */
   dataset: Dataset;
   subgroup: Subgroup;
+  /** Quality of a row of `dataset`. */
+  qualityOf: (row: number) => QualityJudgement | undefined;
   onClose: () => void;
 }
+
+const TOTAL: Record<Tab, string> = { exclusive: 'ε', supporting: 'p', conflicting: 'q' };
 
 type Tab = 'exclusive' | 'supporting' | 'conflicting';
 
@@ -25,7 +32,9 @@ const BLURB: Record<Tab, string> = {
  * answer to "why is this a subgroup?", which is the question a comparativist
  * actually has.
  */
-export function EvidencePanel({ glottometry, dataset, subgroup, onClose }: EvidencePanelProps) {
+export function EvidencePanel({
+  glottometry, dataset, subgroup, qualityOf, onClose,
+}: EvidencePanelProps) {
   const [tab, setTab] = useState<Tab>('exclusive');
 
   const evidence = useMemo(
@@ -40,6 +49,14 @@ export function EvidencePanel({ glottometry, dataset, subgroup, onClose }: Evide
   };
   const items = evidence[tab];
   const memberSet = new Set(subgroup.members);
+
+  // How much of this total rests on high- and low-quality innovations. The
+  // metrics are untouched; this only says what they are made of.
+  const byQuality: Record<QualityClass, number> = { high: 0, low: 0, undetermined: 0 };
+  for (const item of items) {
+    byQuality[qualityOf(item.index)?.quality ?? 'undetermined'] += item.weight;
+  }
+  const total = items.reduce((a, i) => a + i.weight, 0);
 
   return (
     <aside style={S.panel}>
@@ -68,6 +85,18 @@ export function EvidencePanel({ glottometry, dataset, subgroup, onClose }: Evide
 
       <p style={S.blurb}>{BLURB[tab]}</p>
 
+      {items.length > 0 && (
+        <div style={S.composition} aria-label="total by quality">
+          <span>{TOTAL[tab]} {total.toFixed(2)} =</span>
+          {QUALITY_CLASSES.filter((q) => byQuality[q] > 0.0005).map((q, i) => (
+            <span key={q} style={{ color: QUALITY_COLOUR[q] }}>
+              {i > 0 && <span style={S.plus}>+ </span>}
+              {byQuality[q].toFixed(2)} {q}
+            </span>
+          ))}
+        </div>
+      )}
+
       {items.length === 0 ? (
         <p style={S.empty}>None.</p>
       ) : (
@@ -75,13 +104,21 @@ export function EvidencePanel({ glottometry, dataset, subgroup, onClose }: Evide
           {items.map((item) => (
             <li key={item.index} style={S.item}>
               <div style={S.itemHead}>
-                <span style={S.label}>{item.label}</span>
-                {item.weight < 0.999 && (
+                <span style={S.labelLine}>
+                  {qualityOf(item.index) && <QualityMark judgement={qualityOf(item.index)!} />}
+                  <span style={S.label}>{item.label}</span>
+                </span>
+                {item.weight / item.multiplier < 0.999 && (
                   <span
                     style={S.weight}
                     title="Fractional because some cells are unknown"
                   >
-                    {item.weight.toFixed(2)}
+                    {(item.weight / item.multiplier).toFixed(2)}
+                  </span>
+                )}
+                {item.multiplier !== 1 && (
+                  <span style={S.weight} title="Scaled by its type weight">
+                    ×{item.multiplier}
                   </span>
                 )}
               </div>
@@ -155,6 +192,12 @@ const S: Record<string, React.CSSProperties> = {
   list: { listStyle: 'none', margin: 0, padding: 0 },
   item: { padding: '0.35rem 0', borderTop: '1px solid #f0f0f0' },
   itemHead: { display: 'flex', justifyContent: 'space-between', gap: '0.5rem' },
+  labelLine: { display: 'flex', gap: '0.3rem', alignItems: 'baseline', minWidth: 0, flex: 1 },
+  composition: {
+    display: 'flex', gap: '0.35rem', flexWrap: 'wrap', fontSize: '0.72rem',
+    margin: '0 0 0.5rem', fontVariantNumeric: 'tabular-nums',
+  },
+  plus: { color: '#999' },
   label: { fontFamily: 'ui-monospace, monospace', fontSize: '0.74rem' },
   weight: { color: '#a60', fontVariantNumeric: 'tabular-nums', fontSize: '0.7rem' },
   pattern: { display: 'flex', flexWrap: 'wrap', gap: 2, marginTop: 3 },
