@@ -253,7 +253,7 @@ shebang resolves to the old v14.
 ### Layout
 
 ```
-src/core/        metrics, candidates, seriation, layouts, MDS, types, quality — pure, no DOM
+src/core/        metrics, candidates, seriation, layouts, MDS, types, quality, hypothesis, tree — pure
 src/geometry/    tracks, capsule (chain contours), blob + marchingSquares (2-D)
 src/render/      scene, Diagram.tsx, styles, exportSvg
 src/data/        Marama CSV import/export; csv.ts tokeniser, csvCheck.ts validation, templates
@@ -448,6 +448,38 @@ labels that no longer exist are reported, not guessed. Contours are keyed by
 group id (`SceneOptions.keyOf`) because a linkage may have exactly a subgroup's
 members (Smith's fig. 8).
 
+### The hypothesis tree (chain layout)
+
+With a valid tree and the chain layout, hypothesis view draws the subgroups as
+a **sideways cladogram** beside the vertical chain — root left, leaves running
+into the languages — with each subgroup's **defining innovations listed at its
+node** (high → unassessed → low, with quality marks), as Kaufman (2026: 7)
+recommends after Edwards (2021). Only linkages and contact zones stay as
+outlines: the tree carries descent, the outlines carry contact. Toggles: **tree**
+(off → the phase-1 nested contours) and **list innovations** (off → a count).
+2-D layouts keep the contours; a dendrogram has no place on a map.
+
+- **Order** (`core/tree.ts`, `treeOrder`): every subgroup must be an unbroken
+  run, which the glottometric seriation does not guarantee. Children are
+  ordered by where their languages sat in the current chain order, then, for
+  nodes with ≤ 5 children, by every arrangement, minimising the pieces
+  linkages/contact zones are broken into (ties: least drift from the base
+  order). **Dragging is off while the tree is shown** — a drag would break a
+  subgroup or be silently undone — and the legend says so.
+- **Labels cannot collide by construction** (`render/treeDrawing.ts`): a
+  clade's label lives left of its junction within its own languages' span ± half
+  a spacing, where nothing else is drawn except its own stem (name above,
+  list below). The list is cut to what fits, then "+ N more"; the tooltip (and
+  the exported `<title>`) has everything. `tests/tree.test.ts` checks the claim
+  on 200 random trees — no overlaps between clades, no text crossing another
+  clade's lines — and was mutation-checked: widening the label region or
+  moving the list onto the stem both fail it.
+- Identical subgroups nest one inside the other; overlapping ones mean no tree
+  is drawn, with the reason in the legend.
+- The export groups each clade (`<g data-clade>` with a `<title>`) so a vector
+  editor sees one object per node, and the caption says the tree lists defining
+  innovations and what the marks mean.
+
 ### The fragmentation view
 
 Kalyan & François (2019: 171) define a glottometric diagram as a weighted
@@ -613,9 +645,11 @@ contour-engine design, phasing and risks.
       threshold may be wanted once real assessed data shows how harsh it is.
 - [x] Hybrid hypotheses, phase 1: authored subgroups / linkages / contact
       zones with checks against the matrix, drawn with the contour engine.
-- [ ] Hybrid phase 2: a tree drawing (dendrogram over the chain, defining
-      innovations at nodes) with leaf orders constrained to the tree; explicit
-      per-innovation assignments and "lost in X" annotations.
+- [x] Hybrid phase 2a: tree drawing beside the chain with defining
+      innovations at nodes; leaf order constrained to the tree.
+- [ ] Hybrid phase 2b: explicit per-innovation assignments (override the
+      computed explanation) and "lost in X" annotations, feeding the gains
+      count and the node lists.
 - [ ] Hybrid phase 3: side-by-side comparison of hypotheses; an optional
       starting tree from the strongest compatible computed subgroups.
 

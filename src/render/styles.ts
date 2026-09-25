@@ -140,3 +140,15 @@ export const HYPOTHESIS_STYLE: Record<'subgroup' | 'linkage' | 'contact', Contou
   linkage: { stroke: '#2f6db3', strokeWidth: 2.6 },
   contact: { stroke: '#8c8c8c', strokeWidth: 2.2, dasharray: '6 6' },
 };
+
+/** Quality marks: filled, hollow, dash — shape carries it, colour reinforces. */
+export const QUALITY_GLYPH = { high: '●', low: '○', undetermined: '–' } as const;
+
+export const QUALITY_COLOUR = {
+  high: '#2a6f3e',
+  low: '#b86e12',
+  undetermined: '#aaa',
+} as const;
+
+/** The tree beside the chain, in the hypothesis subgroup colour. */
+export const TREE_STROKE = HYPOTHESIS_STYLE.subgroup.stroke;

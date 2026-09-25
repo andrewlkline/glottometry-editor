@@ -11,6 +11,7 @@
  * members while excluding whatever sits among them.
  */
 
+import type { TreeDrawing } from './treeDrawing.js';
 import type { Subgroup } from '../core/types.js';
 import { runsOf, type Layout } from '../core/layout.js';
 import { assignTracks, assignTracksByOverlap } from '../geometry/tracks.js';
@@ -52,6 +53,8 @@ export interface ContourShape {
 }
 
 export interface Scene {
+  /** A hypothesis's tree, drawn beside a chain; see treeDrawing.ts. */
+  tree?: TreeDrawing;
   layout: Layout;
   contours: ContourShape[];
   width: number;

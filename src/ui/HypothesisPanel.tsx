@@ -305,7 +305,7 @@ function Swatch({ kind }: { kind: RelationKind }) {
   );
 }
 
-export function HypothesisLegend({ name }: { name: string }) {
+export function HypothesisLegend({ name, note }: { name: string; note?: string }) {
   return (
     <div style={S.legend}>
       <strong>Hypothesis “{name}”</strong>
@@ -313,6 +313,7 @@ export function HypothesisLegend({ name }: { name: string }) {
       {RELATION_KINDS.map((k) => (
         <span key={k} style={S.legendItem}><Swatch kind={k} /> {RELATION_LABELS[k]}</span>
       ))}
+      {note && <span style={S.hint}>{note}</span>}
     </div>
   );
 }

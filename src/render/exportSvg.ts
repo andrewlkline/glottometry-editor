@@ -11,6 +11,7 @@
 import type { Scene } from './scene.js';
 import { fitLabel, labelHalfWidth, NODE_FILL, NODE_STROKE, NODE_TEXT } from './styles.js';
 import { versionStamp } from '../version.js';
+import { treeSvg } from './treeDrawing.js';
 
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;')
@@ -53,6 +54,8 @@ export function exportSvg(scene: Scene, opts: ExportOptions = {}): string {
     `  <rect x="${viewBox.x}" y="${viewBox.y}" width="${viewBox.width}" ` +
       `height="${totalHeight}" fill="#ffffff"/>`,
   );
+
+  if (scene.tree) lines.push(...treeSvg(scene.tree, esc));
 
   lines.push('  <g id="isoglosses" fill="none" stroke-linejoin="round" stroke-linecap="round">');
   for (const c of contours) {

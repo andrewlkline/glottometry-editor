@@ -4,15 +4,10 @@
  * printing and colour-blindness; colour only reinforces it.
  */
 
-import type { QualityClass, QualityJudgement } from '../core/quality.js';
+import type { QualityJudgement } from '../core/quality.js';
+import { QUALITY_COLOUR, QUALITY_GLYPH as GLYPH } from '../render/styles.js';
 
-const GLYPH: Record<QualityClass, string> = { high: '●', low: '○', undetermined: '–' };
-
-export const QUALITY_COLOUR: Record<QualityClass, string> = {
-  high: '#2a6f3e',
-  low: '#b86e12',
-  undetermined: '#aaa',
-};
+export { QUALITY_COLOUR };
 
 export function QualityMark({ judgement, style }: {
   judgement: QualityJudgement;

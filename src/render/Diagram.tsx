@@ -1,6 +1,9 @@
 import { useCallback, useRef, useState } from 'react';
 import type { Scene } from './scene.js';
-import { fitLabel, labelHalfWidth, NODE_FILL, NODE_STROKE, NODE_TEXT } from './styles.js';
+import {
+  fitLabel, labelHalfWidth, NODE_FILL, NODE_STROKE, NODE_TEXT, QUALITY_COLOUR, QUALITY_GLYPH, TREE_STROKE,
+} from './styles.js';
+import { TREE_TEXT, byClade, type TreeDrawing } from './treeDrawing.js';
 
 export interface DiagramProps {
   scene: Scene;
@@ -102,6 +105,17 @@ export function Diagram({
         fill="#fff"
         onClick={() => onSelect?.(null)}
       />
+
+      {scene.tree && (
+        <TreeLayer
+          tree={scene.tree}
+          emphasised={emphasised}
+          dimmed={dimmed}
+          onSelect={onSelect}
+          onHover={onHover}
+          selected={selected}
+        />
+      )}
 
       <g fill="none" strokeLinejoin="round" strokeLinecap="round">
         {contours.map((c) => {
@@ -211,5 +225,59 @@ function NodeShape({ node, nodeRadius, fill, active }: {
         {text !== node.label && <title>{node.label}</title>}
       </text>
     </>
+  );
+}
+
+/**
+ * The hypothesis tree, one group per clade so that hovering shows its full
+ * list of defining innovations and clicking selects it, as a contour would.
+ */
+function TreeLayer({ tree, emphasised, dimmed, selected, onSelect, onHover }: {
+  tree: TreeDrawing;
+  emphasised: string | null | undefined;
+  dimmed: boolean;
+  selected: string | null | undefined;
+  onSelect?: (key: string | null) => void;
+  onHover?: (key: string | null) => void;
+}) {
+  return (
+    <g fill="none" stroke={TREE_STROKE} strokeLinecap="round" fontFamily="system-ui, sans-serif">
+      {byClade(tree).map((clade) => {
+        const isClade = clade.id !== '';
+        const active = isClade && emphasised === clade.id;
+        const opacity = !dimmed || !isClade ? 1 : active ? 1 : 0.3;
+        return (
+          <g
+            key={clade.id || 'root'}
+            opacity={opacity}
+            onClick={isClade ? () => onSelect?.(selected === clade.id ? null : clade.id) : undefined}
+            onMouseEnter={isClade ? () => onHover?.(clade.id) : undefined}
+            onMouseLeave={isClade ? () => onHover?.(null) : undefined}
+            style={{ cursor: isClade && onSelect ? 'pointer' : undefined }}
+          >
+            {tree.titles[clade.id] && <title>{tree.titles[clade.id]}</title>}
+            {clade.lines.map((l, i) => (
+              <g key={i}>
+                {isClade && <path d={l.d} stroke="transparent" strokeWidth={12} />}
+                <path d={l.d} strokeWidth={active ? 3.4 : isClade ? 2 : 1.4} />
+              </g>
+            ))}
+            {clade.texts.map((t, i) => {
+              const st = TREE_TEXT[t.role];
+              return (
+                <text
+                  key={i} x={t.x} y={t.y} textAnchor="end" stroke="none"
+                  fontSize={st.size} fill={st.fill} fontWeight={st.weight}
+                  fontStyle={st.italic ? 'italic' : undefined}
+                >
+                  {t.mark && <tspan fill={QUALITY_COLOUR[t.mark]}>{QUALITY_GLYPH[t.mark]} </tspan>}
+                  {t.text}
+                </text>
+              );
+            })}
+          </g>
+        );
+      })}
+    </g>
   );
 }

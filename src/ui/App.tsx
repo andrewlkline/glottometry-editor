@@ -15,7 +15,8 @@ import { FormatGuide } from './FormatGuide.js';
 import { QualityLegend } from './QualityLegend.js';
 import { HypothesisLegend, HypothesisPanel } from './HypothesisPanel.js';
 import { analyseHypothesis } from '../core/hypothesis.js';
-import { hypothesisScene } from '../render/hypothesisScene.js';
+import { hypothesisScene, hypothesisTreeScene } from '../render/hypothesisScene.js';
+import { buildTree, treeOrder } from '../core/tree.js';
 import {
   activeHypothesis, addGroup, addHypothesis, duplicateHypothesis, removeGroup, removeHypothesis,
   renameHypothesis, resolveGroups, setActiveHypothesis, updateGroup,
@@ -332,6 +333,57 @@ export function App() {
 
   const showingHypothesis = view === 'hypothesis';
 
+  // --- The tree drawing (chain layout only) ---------------------------------
+  const [showTree, setShowTree] = useState(true);
+  const [listAtNodes, setListAtNodes] = useState(true);
+
+  const hypothesisTree = useMemo(() => {
+    if (!resolvedHypothesis || !dataset || !hypothesisAnalysis) return null;
+    if (hypothesisAnalysis.conflicts.length > 0) return null;
+    if (!resolvedHypothesis.specs.some((s) => s.kind === 'subgroup' && s.members.length > 0)) return null;
+    return buildTree(resolvedHypothesis.specs, dataset.languages.length);
+  }, [resolvedHypothesis, dataset, hypothesisAnalysis]);
+
+  /** Why the tree is not drawn, when it was asked for and the layout allows it. */
+  const treeUnavailable = !hypothesisAnalysis ? null
+    : hypothesisAnalysis.conflicts.length > 0 ? 'subgroups overlap without nesting'
+    : !hypothesisTree ? 'no subgroups yet'
+    : null;
+
+  const hypothesisTreeDrawing = useMemo(() => {
+    if (!showTree || settings?.layoutKind !== 'chain') return null;
+    if (!hypothesisTree || !layout || !scored || !dataset || !hypothesis || !resolvedHypothesis
+      || !hypothesisAnalysis) return null;
+    const specs = resolvedHypothesis.specs;
+    const order = treeOrder(
+      hypothesisTree, layout.order,
+      specs.filter((s) => s.kind !== 'subgroup').map((s) => s.members),
+    );
+    const treeLayout = chainLayout(order, dataset.languages);
+    const names = new Map(hypothesis.groups.map((g) => [g.id, g.name || g.members.join(' + ')]));
+    const reports = new Map(hypothesisAnalysis.groups.map((r) => [r.id, r]));
+    const innovationsOf = (rows: number[]) => rows.map((r) => ({
+      label: scored.dataset.innovations[r]!, quality: classOfScored(r),
+    }));
+    const familyRows = hypothesisAnalysis.explanations
+      .flatMap((e, r) => (e.kind === 'family' ? [r] : []));
+    return hypothesisTreeScene(
+      treeLayout, scored.g, specs, (id) => names.get(id) ?? id, hypothesisTree,
+      (groupId) => {
+        if (groupId === null) {
+          return familyRows.length ? { name: '', innovations: innovationsOf(familyRows) } : null;
+        }
+        const report = reports.get(groupId);
+        return { name: names.get(groupId) ?? '', innovations: innovationsOf(report?.exclusive ?? []) };
+      },
+      { listInnovations: listAtNodes },
+    );
+  }, [showTree, settings?.layoutKind, hypothesisTree, layout, scored, dataset, hypothesis,
+    resolvedHypothesis, hypothesisAnalysis, classOfScored, listAtNodes]);
+
+  /** What the hypothesis view draws: the tree when there is one, else contours. */
+  const hypothesisView = hypothesisTreeDrawing ?? hypothesisDrawing;
+
   const hypothesisSubtitle = useMemo(() => {
     if (!hypothesis || !hypothesisAnalysis) return '';
     const n = (k: string) => hypothesis.groups.filter((g) => g.kind === k).length;
@@ -346,9 +398,12 @@ export function App() {
         ? 'subgroups do not form a tree'
         : `tree needs ${hypothesisAnalysis.extraGains} extra origins (${hypothesisAnalysis.extraGainsFlat} with no subgroups)`,
       `${unexplained} of ${hypothesisAnalysis.informative} informative innovations unexplained`,
-      `${LAYOUT_LABELS[settings!.layoutKind]} layout`,
+      hypothesisTreeDrawing
+        ? 'subgroups drawn as a tree, with their defining innovations at each node '
+          + '(● high, ○ low, – unassessed quality)'
+        : `${LAYOUT_LABELS[settings!.layoutKind]} layout`,
     ].join(' · ');
-  }, [hypothesis, hypothesisAnalysis, settings]);
+  }, [hypothesis, hypothesisAnalysis, settings, hypothesisTreeDrawing]);
 
   const hypothesisEdit = useCallback(
     (fn: (p: Project, id: string) => Project, label: string, key?: string) =>
@@ -570,6 +625,22 @@ export function App() {
             </button>
           ))}
         </span>
+        {showingHypothesis && settings.layoutKind === 'chain' && <>
+          <label style={S.toggle} title="Draw the subgroups as a tree beside the chain">
+            <input type="checkbox" checked={showTree} onChange={(e) => setShowTree(e.target.checked)} />
+            tree
+          </label>
+          {showTree && (
+            <label style={S.toggle} title="List each subgroup's defining innovations at its node">
+              <input
+                type="checkbox"
+                checked={listAtNodes}
+                onChange={(e) => setListAtNodes(e.target.checked)}
+              />
+              list innovations
+            </label>
+          )}
+        </>}
         {!showingHypothesis && <>
         <label style={S.toggle} title="Show the diagram's connected components">
           <input
@@ -606,11 +677,11 @@ export function App() {
         <span style={S.spacer} />
         <button onClick={() => downloadProject(project)}>save project</button>
         <button
-          disabled={showingHypothesis ? !hypothesisDrawing : !exportScene}
+          disabled={showingHypothesis ? !hypothesisView : !exportScene}
           onClick={() => {
             if (showingHypothesis) {
-              if (hypothesisDrawing && hypothesis) {
-                downloadSvg(hypothesisDrawing, `${project.name}-hypothesis-${hypothesis.name}`, {
+              if (hypothesisView && hypothesis) {
+                downloadSvg(hypothesisView, `${project.name}-hypothesis-${hypothesis.name}`, {
                   title: `Hypothesis: ${hypothesis.name} — ${project.name}`,
                   subtitle: hypothesisSubtitle,
                   method: 'A hybrid hypothesis (subgroups, linkages, contact zones), '
@@ -668,7 +739,14 @@ export function App() {
           </p>
 
           {showingHypothesis && hypothesis && mode === 'diagram' && (
-            <HypothesisLegend name={hypothesis.name} />
+            <HypothesisLegend
+              name={hypothesis.name}
+              note={showTree && settings.layoutKind === 'chain' && treeUnavailable
+                ? `No tree drawn: ${treeUnavailable}.`
+                : hypothesisTreeDrawing
+                  ? 'Order follows the tree; drag is off while it is shown.'
+                  : undefined}
+            />
           )}
           {!showingHypothesis && (showQuality || showSurvival) && mode === 'diagram' && (
             <QualityLegend
@@ -772,13 +850,15 @@ export function App() {
 
             <div style={S.stage}>
               <Diagram
-                scene={showingHypothesis && hypothesisDrawing ? hypothesisDrawing : scene}
+                scene={showingHypothesis && hypothesisView ? hypothesisView : scene}
                 highlighted={showingHypothesis ? highlightedGroup : highlighted}
                 selected={showingHypothesis ? selectedGroup : selected}
                 hidden={showingHypothesis ? undefined : hidden}
                 onHover={showingHypothesis ? setHighlightedGroup : setHighlighted}
                 onSelect={showingHypothesis ? setSelectedGroup : setSelected}
-                onReorder={onReorder}
+                // In the tree view the tree decides the order; a drag would
+                // either break a subgroup apart or be silently undone.
+                onReorder={showingHypothesis && hypothesisTreeDrawing ? undefined : onReorder}
                 onMove={onMove}
                 onDragEnd={history.seal}
                 nodeFill={nodeFill}
