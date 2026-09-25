@@ -9,7 +9,7 @@
 import { useState } from 'react';
 import {
   RELATION_KINDS, RELATION_LABELS, groupFindings,
-  type Finding, type HypothesisAnalysis, type RelationKind,
+  type Explanation, type Finding, type HypothesisAnalysis, type RelationKind,
 } from '../core/hypothesis.js';
 import type { Hypothesis, HypothesisGroup } from '../data/hypothesis.js';
 import { HYPOTHESIS_STYLE } from '../render/styles.js';
@@ -35,6 +35,13 @@ export interface HypothesisPanelProps {
   onAddGroup: (group: Omit<HypothesisGroup, 'id'>) => void;
   onUpdateGroup: (id: string, changes: Partial<Omit<HypothesisGroup, 'id'>>) => void;
   onRemoveGroup: (id: string) => void;
+  /**
+   * Explain a row of the analysed dataset by a group (null: back to the
+   * computed explanation). Losses default to the members that lack it.
+   */
+  onAssign: (row: number, groupId: string | null, lostIn?: string[]) => void;
+  /** Assignments pointing at groups that no longer exist. */
+  stale: number;
 }
 
 interface Draft {
@@ -53,6 +60,12 @@ export function HypothesisPanel(props: HypothesisPanelProps) {
   } = props;
   const [draft, setDraft] = useState<Draft | null>(null);
   const [showResidue, setShowResidue] = useState(false);
+  const [openLists, setOpenLists] = useState<Set<string>>(new Set());
+  const toggleList = (id: string) => setOpenLists((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   if (!active) {
     return (
@@ -126,6 +139,14 @@ export function HypothesisPanel(props: HypothesisPanelProps) {
               each is a borrowing or a parallel development, if nothing is ever lost.
             </p>
           )}
+          {(analysis.losses.recorded > 0 || analysis.losses.unrecorded > 0) && (
+            <p style={S.line}>
+              Losses: <strong>{analysis.losses.recorded}</strong> recorded
+              {analysis.losses.unrecorded > 0 && (
+                <span style={S.warnText}>, {analysis.losses.unrecorded} implied but not recorded</span>
+              )}.
+            </p>
+          )}
           <p style={S.line}>
             Of {analysis.informative} informative innovations: {counts.tree} inherited in a
             subgroup, {counts.linkage} within a linkage, {counts.contact} within a contact
@@ -145,10 +166,34 @@ export function HypothesisPanel(props: HypothesisPanelProps) {
                     (e.withinSubgroup.missing.length
                       ? `, absent from ${e.withinSubgroup.missing.map(nameOf).join(', ')}` : '')
                   : e.kind === 'residue' ? `${e.gains} separate origins` : '';
+                const within = e.kind === 'residue' ? e.withinSubgroup : undefined;
                 return (
-                  <li key={r}>
+                  <li key={r} style={S.residueItem}>
                     <span style={S.mono}>{innovations[r]}</span>
                     {hint && <span style={S.hint}> — {hint}</span>}
+                    <span style={S.actions}>
+                      {within && (
+                        <button
+                          style={S.tiny}
+                          title="Record it as inherited in this subgroup and lost where it is absent"
+                          onClick={() => props.onAssign(r, within.groupId)}
+                        >
+                          inherited in {groupNameById(within.groupId)}
+                          {within.missing.length ? `, lost in ${within.missing.map(nameOf).join(', ')}` : ''}
+                        </button>
+                      )}
+                      <select
+                        value=""
+                        onChange={(ev) => ev.target.value && props.onAssign(r, ev.target.value)}
+                        style={S.tinySelect}
+                        aria-label="explain by a group"
+                      >
+                        <option value="">explain by…</option>
+                        {active.groups.map((g) => (
+                          <option key={g.id} value={g.id}>{groupName(g)} ({RELATION_LABELS[g.kind]})</option>
+                        ))}
+                      </select>
+                    </span>
                   </li>
                 );
               })}
@@ -156,6 +201,13 @@ export function HypothesisPanel(props: HypothesisPanelProps) {
             </ol>
           )}
         </section>
+      )}
+
+      {props.stale > 0 && (
+        <p style={S.hint}>
+          {props.stale} {props.stale === 1 ? 'assignment points' : 'assignments point'} at a group
+          that no longer exists and {props.stale === 1 ? 'is' : 'are'} ignored.
+        </p>
       )}
 
       {unknown.length > 0 && (
@@ -220,6 +272,49 @@ export function HypothesisPanel(props: HypothesisPanelProps) {
                   </li>
                 ))}
               </ul>
+              {report && (() => {
+                const assignedRows = new Map(report.assigned.map((a) => [a.row, a.detail]));
+                const rows = g.kind === 'subgroup'
+                  ? report.credited.map((c) => c.row)
+                  : report.assigned.map((a) => a.row);
+                if (rows.length === 0) return null;
+                const open = openLists.has(g.id);
+                return (
+                  <div style={S.listBlock}>
+                    <button style={S.link} onClick={() => toggleList(g.id)}>
+                      {open ? 'hide' : 'show'} {g.kind === 'subgroup' ? 'innovations credited here' : 'assigned innovations'} ({rows.length})
+                    </button>
+                    {open && (
+                      <ol style={S.residue}>
+                        {rows.map((row) => {
+                          const d = assignedRows.get(row);
+                          return (
+                            <li key={row} style={S.residueItem}>
+                              <span style={S.mono}>{innovations[row]}</span>
+                              {d && d.lost.length > 0 && (
+                                <span style={S.hint}> — lost in {d.lost.map(nameOf).join(', ')}</span>
+                              )}
+                              {d && d.unrecorded.length > 0 && (
+                                <span style={S.warnText}> — absent from {d.unrecorded.map(nameOf).join(', ')}, no loss recorded</span>
+                              )}
+                              {d && d.outside.length > 0 && (
+                                <span style={S.hint}> — also in {d.outside.map(nameOf).join(', ')}</span>
+                              )}
+                              <span style={S.actions}>
+                                {d ? (
+                                  <button style={S.tiny} onClick={() => props.onAssign(row, null)} title="Back to the computed explanation">
+                                    unassign
+                                  </button>
+                                ) : <span style={S.hint}>fits exactly</span>}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    )}
+                  </div>
+                );
+              })()}
             </li>
           );
         })}
@@ -305,6 +400,23 @@ function Swatch({ kind }: { kind: RelationKind }) {
   );
 }
 
+/** An explanation in words, for the detail pane. */
+export function describeExplanation(
+  e: Explanation,
+  groupName: (id: string) => string,
+  nameOf: (l: number) => string,
+): string {
+  switch (e.kind) {
+    case 'single': return 'in a single language: uninformative for grouping';
+    case 'family': return 'shared by the whole family';
+    case 'tree': return `inherited in ${groupName(e.groupId)}` +
+      (e.assigned?.lost.length ? `, lost in ${e.assigned.lost.map(nameOf).join(', ')}` : '');
+    case 'linkage': return `spread within the linkage ${groupName(e.groupId)}`;
+    case 'contact': return `spread within the contact zone ${groupName(e.groupId)}`;
+    case 'residue': return `unexplained: needs ${e.gains} separate origins on this tree`;
+  }
+}
+
 export function HypothesisLegend({ name, note }: { name: string; note?: string }) {
   return (
     <div style={S.legend}>
@@ -347,7 +459,11 @@ const S: Record<string, React.CSSProperties> = {
     border: 'none', background: 'none', padding: '0 0 0 0.3rem', cursor: 'pointer',
     color: '#246', textDecoration: 'underline', fontSize: '0.72rem',
   },
-  residue: { margin: 0, paddingLeft: '1.2rem', maxHeight: 200, overflowY: 'auto', fontSize: '0.7rem' },
+  residue: { margin: 0, paddingLeft: '1.2rem', maxHeight: 260, overflowY: 'auto', fontSize: '0.7rem' },
+  residueItem: { marginBottom: '0.25rem' },
+  actions: { display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.1rem' },
+  tinySelect: { fontSize: '0.66rem', maxWidth: 170 },
+  listBlock: { marginTop: '0.3rem' },
   mono: { fontFamily: 'ui-monospace, monospace' },
   hint: { color: '#999', fontSize: '0.7rem' },
   groupsHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.2rem' },

@@ -15,7 +15,9 @@
 import type { Cell, Dataset } from '../core/types.js';
 import type { Project } from './project.js';
 import { emptyMeta, reconcile, type InnovationMeta } from './innovationMeta.js';
-import { removeLanguageFromHypotheses, renameLanguageInHypotheses } from './hypothesis.js';
+import {
+  forgetInnovation, removeLanguageFromHypotheses, renameLanguageInHypotheses,
+} from './hypothesis.js';
 
 /** Cells cycle 1 → 0 → unknown, which is the order a coder works in. */
 export function nextCellValue(current: Cell): Cell {
@@ -90,11 +92,12 @@ export function removeInnovation(project: Project, row: number): Project {
       innovations: dataset.innovations.filter((_, i) => i !== row),
       matrix: dataset.matrix.filter((_, i) => i !== row),
     },
-    // A deleted innovation cannot still be ordered against.
+    // A deleted innovation cannot still be ordered against, or explained.
     innovationMeta: remaining.map((m) =>
       (m.precedes?.includes(removedId)
         ? { ...m, precedes: m.precedes.filter((id) => id !== removedId) }
         : m)),
+    hypotheses: forgetInnovation(project.hypotheses, removedId),
   };
 }
 

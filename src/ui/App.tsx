@@ -18,8 +18,9 @@ import { analyseHypothesis } from '../core/hypothesis.js';
 import { hypothesisScene, hypothesisTreeScene } from '../render/hypothesisScene.js';
 import { buildTree, treeOrder } from '../core/tree.js';
 import {
-  activeHypothesis, addGroup, addHypothesis, duplicateHypothesis, removeGroup, removeHypothesis,
-  renameHypothesis, resolveGroups, setActiveHypothesis, updateGroup,
+  activeHypothesis, addGroup, addHypothesis, assignInnovation, duplicateHypothesis, removeGroup,
+  removeHypothesis, renameHypothesis, resolveAssignments, resolveGroups, setActiveHypothesis,
+  updateGroup,
 } from '../data/hypothesis.js';
 import {
   createProject, downloadProject, parseProject, resolveOrder, type Project,
@@ -311,18 +312,64 @@ export function App() {
   const [highlightedGroup, setHighlightedGroup] = useState<string | null>(null);
   const hypothesis = project ? activeHypothesis(project) : null;
 
+  const hypothesisEdit = useCallback(
+    (fn: (p: Project, id: string) => Project, label: string, key?: string) =>
+      history.set((p) => {
+        const h = p && activeHypothesis(p);
+        return p && h ? fn(p, h.id) : p;
+      }, label, key),
+    [history],
+  );
+
   const resolvedHypothesis = useMemo(
     () => (hypothesis && dataset ? resolveGroups(hypothesis, dataset.languages) : null),
     [hypothesis, dataset],
   );
 
+  /** The analyst's assignments, by row of the scored dataset. */
+  const resolvedAssignments = useMemo(() => {
+    if (!hypothesis || !scored || !dataset) return null;
+    return resolveAssignments(
+      hypothesis, scored.rows.map((r) => meta[r]?.id), dataset.languages,
+    );
+  }, [hypothesis, scored, dataset, meta]);
+
   // Checked against the scored dataset, so the type filter decides what
   // evidence counts here exactly as it does for the computed diagram.
   const hypothesisAnalysis = useMemo(
     () => (resolvedHypothesis && scored
-      ? analyseHypothesis(scored.dataset, resolvedHypothesis.specs, classOfScored, layout?.order)
+      ? analyseHypothesis(
+        scored.dataset, resolvedHypothesis.specs, classOfScored, layout?.order,
+        resolvedAssignments?.assignmentOf,
+      )
       : null),
-    [resolvedHypothesis, scored, classOfScored, layout?.order],
+    [resolvedHypothesis, scored, classOfScored, layout?.order, resolvedAssignments],
+  );
+
+  /**
+   * Explain an innovation (by original row) in the active hypothesis. Assigning
+   * to a subgroup records losses in the members that lack it: choosing
+   * "inherited here" is the judgement; the losses it entails are bookkeeping.
+   */
+  const assignRow = useCallback(
+    (row: number, groupId: string | null, lostIn?: string[]) => {
+      hypothesisEdit((current, hid) => {
+        // The id comes from the stored metadata, which is stored with the
+        // edit: an id that is not saved would orphan the assignment on reload.
+        const innovationMeta = reconcile(current.innovationMeta, current.dataset.innovations.length);
+        const id = innovationMeta[row]?.id;
+        if (!id) return current;
+        const p = { ...current, innovationMeta };
+        if (groupId === null) return assignInnovation(p, hid, id, null);
+        const group = activeHypothesis(p)?.groups.find((g) => g.id === groupId);
+        const cells = p.dataset.matrix[row] ?? [];
+        const lost = lostIn ?? (group?.kind === 'subgroup'
+          ? group.members.filter((m) => cells[p.dataset.languages.indexOf(m)] === 0)
+          : []);
+        return assignInnovation(p, hid, id, { groupId, lostIn: lost });
+      }, groupId ? 'assign innovation' : 'clear assignment');
+    },
+    [hypothesisEdit],
   );
 
   const hypothesisDrawing = useMemo(() => {
@@ -362,8 +409,10 @@ export function App() {
     const treeLayout = chainLayout(order, dataset.languages);
     const names = new Map(hypothesis.groups.map((g) => [g.id, g.name || g.members.join(' + ')]));
     const reports = new Map(hypothesisAnalysis.groups.map((r) => [r.id, r]));
-    const innovationsOf = (rows: number[]) => rows.map((r) => ({
-      label: scored.dataset.innovations[r]!, quality: classOfScored(r),
+    const lostSuffix = (lost: number[]) =>
+      (lost.length ? ` (lost in ${lost.map((l) => dataset.languages[l]).join(', ')})` : '');
+    const innovationsOf = (rows: { row: number; lost?: number[] }[]) => rows.map(({ row, lost }) => ({
+      label: scored.dataset.innovations[row]! + lostSuffix(lost ?? []), quality: classOfScored(row),
     }));
     const familyRows = hypothesisAnalysis.explanations
       .flatMap((e, r) => (e.kind === 'family' ? [r] : []));
@@ -371,10 +420,11 @@ export function App() {
       treeLayout, scored.g, specs, (id) => names.get(id) ?? id, hypothesisTree,
       (groupId) => {
         if (groupId === null) {
-          return familyRows.length ? { name: '', innovations: innovationsOf(familyRows) } : null;
+          return familyRows.length
+            ? { name: '', innovations: innovationsOf(familyRows.map((row) => ({ row }))) } : null;
         }
         const report = reports.get(groupId);
-        return { name: names.get(groupId) ?? '', innovations: innovationsOf(report?.exclusive ?? []) };
+        return { name: names.get(groupId) ?? '', innovations: innovationsOf(report?.credited ?? []) };
       },
       { listInnovations: listAtNodes },
     );
@@ -405,14 +455,6 @@ export function App() {
     ].join(' · ');
   }, [hypothesis, hypothesisAnalysis, settings, hypothesisTreeDrawing]);
 
-  const hypothesisEdit = useCallback(
-    (fn: (p: Project, id: string) => Project, label: string, key?: string) =>
-      history.set((p) => {
-        const h = p && activeHypothesis(p);
-        return p && h ? fn(p, h.id) : p;
-      }, label, key),
-    [history],
-  );
 
   const selectedSubgroup = scene?.contours.find((c) => c.key === selected)?.subgroup ?? null;
 
@@ -799,6 +841,20 @@ export function App() {
                   dataset={dataset}
                   meta={meta}
                   row={editingRow}
+                  hypothesis={hypothesis && hypothesisAnalysis ? (() => {
+                    const scoredRow = scored.rows.indexOf(editingRow);
+                    const id = meta[editingRow]?.id;
+                    return {
+                      name: hypothesis.name,
+                      groups: hypothesis.groups,
+                      explanation: scoredRow === -1
+                        ? 'filtered' as const
+                        : hypothesisAnalysis.explanations[scoredRow] ?? null,
+                      assignment: id ? hypothesis.assignments?.[id] : undefined,
+                      onAssign: (groupId: string | null, lostIn?: string[]) =>
+                        assignRow(editingRow, groupId, lostIn),
+                    };
+                  })() : undefined}
                   onRename={(label) => edit(
                     (p) => renameInnovation(p, editingRow, label),
                     'rename innovation', `label:${editingRow}`,
@@ -893,6 +949,8 @@ export function App() {
                 onUpdateGroup={(groupId, changes) => hypothesisEdit(
                   (p, id) => updateGroup(p, id, groupId, changes), 'edit group',
                 )}
+                onAssign={(row, groupId, lostIn) => assignRow(scored.rows[row]!, groupId, lostIn)}
+                stale={resolvedAssignments?.stale ?? 0}
                 onRemoveGroup={(groupId) => {
                   if (selectedGroup === groupId) setSelectedGroup(null);
                   hypothesisEdit((p, id) => removeGroup(p, id, groupId), 'delete group');

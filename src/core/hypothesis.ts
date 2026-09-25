@@ -264,11 +264,38 @@ export function bestChain(
 // ---------------------------------------------------------------------------
 // The analysis
 
+/**
+ * The analyst's own explanation of one innovation, overriding the computed
+ * one: "inherited in this subgroup, and lost in these members", or "spread
+ * through this linkage". Deciding that an absence is a loss is exactly the
+ * judgement the matrix cannot make (Kaufman 2026: 10–11), so it is recorded
+ * rather than inferred, and checked rather than trusted.
+ */
+export interface Assignment {
+  groupId: string;
+  /** Members in which the innovation is claimed to have been lost. */
+  lostIn: number[];
+}
+
+/** How an assignment squares with the matrix. */
+export interface AssignedDetail {
+  /** Recorded losses the matrix bears out (absent or unknown there). */
+  lost: number[];
+  /** Members lacking it (a 0) with no loss recorded. Subgroups only. */
+  unrecorded: number[];
+  /** Losses recorded where the matrix says the language has it. */
+  contradicted: number[];
+  /** Outsiders that have it: borrowing, for a subgroup; a misfit for a zone. */
+  outside: number[];
+  /** No member of the group has it at all. */
+  noneInside: boolean;
+}
+
 export type Explanation =
   | { kind: 'single' }
   | { kind: 'family' }
-  | { kind: 'tree'; groupId: string }
-  | { kind: 'linkage' | 'contact'; groupId: string }
+  | { kind: 'tree'; groupId: string; assigned?: AssignedDetail }
+  | { kind: 'linkage' | 'contact'; groupId: string; assigned?: AssignedDetail }
   | {
     kind: 'residue';
     gains: number;
@@ -305,6 +332,14 @@ export interface GroupReport {
   internalQuality: QualityTally;
   /** For linkages and contact zones with internal rows. */
   chain?: { order: number[]; contiguous: number; total: number; exact: boolean };
+  /** Rows the analyst assigned to this group, with how they fit. */
+  assigned: { row: number; detail: AssignedDetail }[];
+  /**
+   * For subgroups, the innovations the hypothesis credits to this node: those
+   * fitting it exactly that are not assigned elsewhere, plus those assigned
+   * to it. What the tree lists at the node.
+   */
+  credited: { row: number; lost: number[] }[];
 }
 
 export interface HypothesisAnalysis {
@@ -319,6 +354,8 @@ export interface HypothesisAnalysis {
   /** The same with no subgroups at all, for comparison. */
   extraGainsFlat: number;
   residue: number[];
+  /** Losses implied by assignments to subgroups: recorded, and not. */
+  losses: { recorded: number; unrecorded: number };
 }
 
 const tally = (rows: number[], classOf: (row: number) => QualityClass): QualityTally => {
@@ -333,6 +370,8 @@ export function analyseHypothesis(
   classOf: (row: number) => QualityClass,
   /** Starting order for the heuristic chain search, e.g. the chain layout's. */
   layoutOrder?: number[],
+  /** The analyst's explanation of a row, if any. */
+  assignmentOf?: (row: number) => Assignment | undefined,
 ): HypothesisAnalysis {
   const n = dataset.languages.length;
   const rows = dataset.matrix.map(rowSets);
@@ -354,6 +393,8 @@ export function analyseHypothesis(
   let extraGains = 0;
   let extraGainsFlat = 0;
   const residue: number[] = [];
+  const losses = { recorded: 0, unrecorded: 0 };
+  const groupsById = new Map(groups.map((g) => [g.id, g]));
 
   const byMembersAsc = <T extends GroupSpec>(gs: T[]) =>
     gs.slice().sort((a, b) => a.members.length - b.members.length);
@@ -371,6 +412,43 @@ export function analyseHypothesis(
     }
     informative++;
     extraGainsFlat += sets.ones.length - 1;
+
+    const assignment = assignmentOf?.(r);
+    const target = assignment && groupsById.get(assignment.groupId);
+    if (assignment && target) {
+      const members = new Set(target.members);
+      const has = new Set(sets.ones);
+      const outside = sets.ones.filter((l) => !members.has(l));
+      const claimed = new Set(assignment.lostIn);
+      const detail: AssignedDetail = {
+        lost: target.kind === 'subgroup'
+          ? target.members.filter((m) => claimed.has(m) && !has.has(m)) : [],
+        unrecorded: target.kind === 'subgroup'
+          ? target.members.filter((m) => sets.zeros.has(m) && !claimed.has(m)) : [],
+        contradicted: assignment.lostIn.filter((m) => has.has(m)),
+        outside,
+        noneInside: !sets.ones.some((l) => members.has(l)),
+      };
+      if (target.kind === 'subgroup') {
+        // One origin at the node, losses below it, and whatever origins the
+        // outsiders need — on the rest of the tree, not through this node.
+        const rest: RowSets = {
+          ones: outside,
+          maybe: new Set([...sets.maybe].filter((l) => !members.has(l))),
+          zeros: sets.zeros,
+        };
+        const gains = treeValid ? 1 + gainsOn(rest, clades).gains : sets.ones.length;
+        extraGains += gains - 1;
+        losses.recorded += detail.lost.length;
+        losses.unrecorded += detail.unrecorded.length;
+        explanations.push({ kind: 'tree', groupId: target.id, assigned: detail });
+      } else {
+        const { gains } = treeValid ? gainsOn(sets, clades) : { gains: sets.ones.length };
+        extraGains += gains - 1;
+        explanations.push({ kind: target.kind, groupId: target.id, assigned: detail });
+      }
+      return;
+    }
 
     const { gains } = treeValid ? gainsOn(sets, clades) : { gains: sets.ones.length };
     extraGains += gains - 1;
@@ -395,6 +473,24 @@ export function analyseHypothesis(
     });
     residue.push(r);
   });
+
+  const assignedTo = new Map<string, { row: number; detail: AssignedDetail }[]>();
+  const creditedTo = new Map<string, { row: number; lost: number[] }[]>();
+  explanations.forEach((e, row) => {
+    if (e.kind !== 'tree' && e.kind !== 'linkage' && e.kind !== 'contact') return;
+    if (e.assigned) {
+      assignedTo.set(e.groupId, [...(assignedTo.get(e.groupId) ?? []), { row, detail: e.assigned }]);
+    }
+    if (e.kind === 'tree') {
+      creditedTo.set(e.groupId, [
+        ...(creditedTo.get(e.groupId) ?? []), { row, lost: e.assigned?.lost ?? [] },
+      ]);
+    }
+  });
+  const isAssigned = (row: number) => {
+    const e = explanations[row]!;
+    return 'assigned' in e && !!e.assigned;
+  };
 
   const reports = groups.map((g): GroupReport => {
     const members = new Set(g.members);
@@ -421,7 +517,8 @@ export function analyseHypothesis(
           const lower = subgroups.some((s) =>
             s.id !== g.id && s.members.length < members.size
             && fitsExactly(sets, subgroupSets.get(s.id)!));
-          if (missing.length > 0 && inside.length >= halfOrTwo && !lower) {
+          // Nor if the analyst has already said what explains it.
+          if (missing.length > 0 && inside.length >= halfOrTwo && !lower && !isAssigned(r)) {
             gaps.push({ row: r, missing });
           }
         }
@@ -461,6 +558,8 @@ export function analyseHypothesis(
       internal,
       internalQuality: tally(internal, classOf),
       chain,
+      assigned: assignedTo.get(g.id) ?? [],
+      credited: g.kind === 'subgroup' ? creditedTo.get(g.id) ?? [] : [],
     };
   });
 
@@ -472,6 +571,7 @@ export function analyseHypothesis(
     extraGains: treeValid ? extraGains : null,
     extraGainsFlat,
     residue,
+    losses,
   };
 }
 
@@ -580,6 +680,8 @@ export function groupFindings(
     }
   }
 
+  out.push(...assignmentFindings(report, nameOf));
+
   if (report.leakage.length > 0) {
     const top = [...report.leakageTo.entries()]
       .sort((a, b) => b[1] - a[1])
@@ -598,6 +700,77 @@ export function groupFindings(
       text: `${report.conflicts.length} ${report.conflicts.length === 1 ? 'innovation cuts' : 'innovations cut'} ` +
         'across its boundary.',
     });
+  }
+  return out;
+}
+
+/** Tally languages across rows, as "C ×3, D ×1". */
+function tallyNames(lists: number[][], nameOf: (l: number) => string): string {
+  const counts = new Map<number, number>();
+  for (const list of lists) for (const l of list) counts.set(l, (counts.get(l) ?? 0) + 1);
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([l, k]) => `${nameOf(l)} ×${k}`)
+    .join(', ');
+}
+
+/** What the analyst's assignments to this group say, and where they misfit. */
+function assignmentFindings(report: GroupReport, nameOf: (l: number) => string): Finding[] {
+  const a = report.assigned;
+  if (a.length === 0) return [];
+  const out: Finding[] = [];
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+  const withLosses = a.filter((x) => x.detail.lost.length > 0);
+  out.push({
+    level: 'note',
+    text: `${plural(a.length, 'innovation is', 'innovations are')} assigned here` +
+      (withLosses.length
+        ? `, ${withLosses.length} with recorded losses (${tallyNames(withLosses.map((x) => x.detail.lost), nameOf)}).`
+        : '.'),
+  });
+
+  const unrecorded = a.filter((x) => x.detail.unrecorded.length > 0);
+  if (unrecorded.length) {
+    out.push({
+      level: 'warn',
+      text: `${plural(unrecorded.length, 'assigned innovation is', 'assigned innovations are')} ` +
+        `absent from members with no loss recorded (${tallyNames(unrecorded.map((x) => x.detail.unrecorded), nameOf)}): ` +
+        'record the losses, or assign elsewhere.',
+    });
+  }
+  const contradicted = a.filter((x) => x.detail.contradicted.length > 0);
+  if (contradicted.length) {
+    out.push({
+      level: 'warn',
+      text: `A loss is recorded where the language has the innovation ` +
+        `(${tallyNames(contradicted.map((x) => x.detail.contradicted), nameOf)}), in ` +
+        `${plural(contradicted.length, 'innovation', 'innovations')}.`,
+    });
+  }
+  const empty = a.filter((x) => x.detail.noneInside);
+  if (empty.length) {
+    out.push({
+      level: 'warn',
+      text: `${plural(empty.length, 'assigned innovation is', 'assigned innovations are')} ` +
+        'not present in any member of this group.',
+    });
+  }
+  const outside = a.filter((x) => x.detail.outside.length > 0);
+  if (outside.length) {
+    const names = tallyNames(outside.map((x) => x.detail.outside), nameOf);
+    out.push(report.kind === 'subgroup'
+      ? {
+        level: 'note',
+        text: `${plural(outside.length, 'assigned innovation also occurs', 'assigned innovations also occur')} ` +
+          `outside (${names}): each such language needs a borrowing, counted in the extra origins.`,
+      }
+      : {
+        level: 'warn',
+        text: `${plural(outside.length, 'assigned innovation occurs', 'assigned innovations occur')} ` +
+          `outside this group (${names}), so spread within it does not account for it.`,
+      });
   }
   return out;
 }

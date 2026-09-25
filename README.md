@@ -480,6 +480,43 @@ outlines: the tree carries descent, the outlines carry contact. Toggles: **tree*
   editor sees one object per node, and the caption says the tree lists defining
   innovations and what the marks mean.
 
+### Innovation assignments and losses
+
+The analyst can overrule the computed explanation of any innovation, per
+hypothesis: **"inherited in subgroup G, lost in X, Y"** or **"spread within
+linkage/contact zone L"**. Deciding that an absence is a loss is the judgement
+the matrix cannot make (Kaufman 2026: 10–11), so it is *recorded and checked*,
+never inferred. Three places to do it: quick actions on the unexplained list
+(including "inherited in G, lost in …" wherever an innovation falls within a
+subgroup), an "explained by" section with per-member loss checkboxes in the
+data view's detail pane, and each group card's list of innovations credited or
+assigned to it (with unassign).
+
+- **Stored** in `Hypothesis.assignments`, keyed by **innovation id** (survives
+  relabelling/reordering), losses by language label. Cascades: deleting a group
+  drops its assignments; renaming/deleting a language updates losses; deleting
+  an innovation forgets it; copying a hypothesis re-points assignments at the
+  copied groups. Assignments to a vanished group are ignored and counted.
+- **Counting**: a subgroup assignment is one origin at the node plus the
+  origins its *outsiders* need on the rest of the tree (borrowings); so a
+  recorded loss lowers the extra-origins total. Losses are tallied: recorded,
+  and implied-but-unrecorded (a member with 0 not listed).
+- **Checked, not trusted**: unrecorded losses, losses recorded where the
+  language *has* the innovation, assignments no member of the group shares,
+  and (for zones) occurrences outside the zone are all flagged.
+- **Assigning to a subgroup pre-fills losses** for members with a 0: choosing
+  "inherited here" is the judgement; the losses it entails are bookkeeping. A
+  later matrix edit can still produce an unrecorded loss, which is then flagged.
+- The tree's node lists and tooltips use the **credited** innovations (exact
+  fits not assigned elsewhere, plus assignments), with "(lost in …)".
+- Single-language and family-wide innovations ignore assignments.
+
+**Gotcha fixed along the way:** projects made by `createProject` (CSV import,
+demo) had no stored innovation metadata, so `reconcile` invented fresh ids on
+every call and anything keyed by them — assignments, and the relative-chronology
+orderings — was orphaned on reload. `createProject` now stores ids from the
+start, and the assign action persists the ids it keys by.
+
 ### The fragmentation view
 
 Kalyan & François (2019: 171) define a glottometric diagram as a weighted
@@ -647,9 +684,8 @@ contour-engine design, phasing and risks.
       zones with checks against the matrix, drawn with the contour engine.
 - [x] Hybrid phase 2a: tree drawing beside the chain with defining
       innovations at nodes; leaf order constrained to the tree.
-- [ ] Hybrid phase 2b: explicit per-innovation assignments (override the
-      computed explanation) and "lost in X" annotations, feeding the gains
-      count and the node lists.
+- [x] Hybrid phase 2b: per-innovation assignments and loss annotations,
+      feeding the origins count, loss tally and node lists.
 - [ ] Hybrid phase 3: side-by-side comparison of hypotheses; an optional
       starting tree from the strongest compatible computed subgroups.
 

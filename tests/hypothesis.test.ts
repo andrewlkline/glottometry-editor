@@ -4,16 +4,17 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  analyseHypothesis, bestChain, groupFindings, rowSets, treeConflicts, type GroupSpec,
+  analyseHypothesis, bestChain, groupFindings, rowSets, treeConflicts,
+  type Assignment, type GroupSpec,
 } from '../src/core/hypothesis.js';
 import type { Cell, Dataset } from '../src/core/types.js';
 import type { QualityClass } from '../src/core/quality.js';
 import { createProject, parseProject, serializeProject } from '../src/data/project.js';
 import {
-  activeHypothesis, addGroup, addHypothesis, duplicateHypothesis, removeGroup,
-  removeHypothesis, resolveGroups, updateGroup,
+  activeHypothesis, addGroup, addHypothesis, assignInnovation, duplicateHypothesis, removeGroup,
+  removeHypothesis, resolveAssignments, resolveGroups, updateGroup,
 } from '../src/data/hypothesis.js';
-import { removeLanguage, renameLanguage } from '../src/data/edit.js';
+import { removeInnovation, removeLanguage, renameLanguage } from '../src/data/edit.js';
 import { Glottometry } from '../src/core/metrics.js';
 import { chainLayout, orderFor } from '../src/core/layout.js';
 import { hypothesisScene } from '../src/render/hypothesisScene.js';
@@ -348,5 +349,156 @@ describe('drawing a hypothesis', () => {
     const described = exportSvg(scene, { method: 'A hybrid hypothesis' });
     expect(described).toMatch(/<desc>A hybrid hypothesis\. Drawn by/);
     expect(exportSvg(scene)).toMatch(/after Kalyan &amp; François \(2018\)/);
+  });
+});
+
+describe('assignments and losses', () => {
+  // Five lects; ABC is a subgroup, DE a linkage.
+  const ds: Dataset = {
+    languages: ['A', 'B', 'C', 'D', 'E'],
+    innovations: ['AB only', 'ABC + E', 'D and E', 'ABC exact', 'in all', 'A alone'],
+    matrix: [
+      [1, 1, 0, 0, 0],
+      [1, 1, 1, 0, 1],
+      [0, 0, 0, 1, 1],
+      [1, 1, 1, 0, 0],
+      [1, 1, 1, 1, 1],
+      [1, 0, 0, 0, 0],
+    ],
+  };
+  const groups: GroupSpec[] = [
+    { id: 'ABC', kind: 'subgroup', members: [0, 1, 2] },
+    { id: 'DE', kind: 'linkage', members: [3, 4] },
+  ];
+  const run = (assign: Record<number, Assignment>) =>
+    analyseHypothesis(ds, groups, undetermined, undefined, (r) => assign[r]);
+
+  it('turns a gap into one origin and a recorded loss', () => {
+    const before = run({});
+    expect(before.explanations[0]).toMatchObject({ kind: 'residue', gains: 2 });
+    const after = run({ 0: { groupId: 'ABC', lostIn: [2] } });
+    expect(after.explanations[0]).toEqual({
+      kind: 'tree', groupId: 'ABC',
+      assigned: { lost: [2], unrecorded: [], contradicted: [], outside: [], noneInside: false },
+    });
+    expect(after.extraGains).toBe(before.extraGains! - 1);
+    expect(after.losses).toEqual({ recorded: 1, unrecorded: 0 });
+    expect(after.residue).not.toContain(0);
+  });
+
+  it('flags a loss the analyst has not recorded, without refusing the claim', () => {
+    const a = run({ 0: { groupId: 'ABC', lostIn: [] } });
+    expect(a.explanations[0]).toMatchObject({ kind: 'tree', assigned: { unrecorded: [2] } });
+    expect(a.losses).toEqual({ recorded: 0, unrecorded: 1 });
+    const text = groupFindings(a.groups[0]!, (l) => ds.languages[l]!).map((f) => `${f.level}: ${f.text}`);
+    expect(text).toContainEqual(expect.stringMatching(/^warn: 1 assigned innovation is absent from members with no loss recorded \(C ×1\)/));
+  });
+
+  it('counts outsiders as borrowings when a subgroup is credited', () => {
+    const a = run({ 1: { groupId: 'ABC', lostIn: [] } });
+    expect(a.explanations[1]).toMatchObject({ kind: 'tree', assigned: { outside: [4] } });
+    // One origin at ABC and one in E: one extra, the same as without it.
+    expect(run({}).extraGains).toBe(a.extraGains);
+  });
+
+  it('flags a loss recorded where the language has the innovation', () => {
+    const a = run({ 3: { groupId: 'ABC', lostIn: [1] } });
+    expect(a.explanations[3]).toMatchObject({ assigned: { contradicted: [1], lost: [] } });
+    expect(groupFindings(a.groups[0]!, (l) => ds.languages[l]!).some((f) =>
+      f.level === 'warn' && /loss is recorded where the language has/.test(f.text))).toBe(true);
+  });
+
+  it('flags a zone assignment that leaks, and one to a group nobody in it has', () => {
+    const a = run({ 0: { groupId: 'DE', lostIn: [] }, 2: { groupId: 'ABC', lostIn: [] } });
+    expect(a.explanations[0]).toMatchObject({ kind: 'linkage', assigned: { outside: [0, 1], noneInside: true } });
+    expect(a.explanations[2]).toMatchObject({ kind: 'tree', assigned: { noneInside: true } });
+    const zone = groupFindings(a.groups[1]!, (l) => ds.languages[l]!);
+    expect(zone.some((f) => f.level === 'warn' && /occurs outside this group \(A ×1, B ×1\)/.test(f.text))).toBe(true);
+  });
+
+  it('credits a subgroup with exact fits and assignments, minus fits assigned elsewhere', () => {
+    expect(run({}).groups[0]!.credited).toEqual([{ row: 3, lost: [] }]);
+    const moved = run({ 3: { groupId: 'DE', lostIn: [] }, 0: { groupId: 'ABC', lostIn: [2] } });
+    expect(moved.groups[0]!.credited).toEqual([{ row: 0, lost: [2] }]);
+    expect(moved.groups[1]!.assigned.map((x) => x.row)).toEqual([3]);
+  });
+
+  it('no longer reports an assigned innovation as a gap', () => {
+    expect(run({}).groups[0]!.gaps.map((g) => g.row)).toEqual([0]);
+    expect(run({ 0: { groupId: 'ABC', lostIn: [2] } }).groups[0]!.gaps).toEqual([]);
+  });
+
+  it('ignores assignments of single-language and family-wide innovations', () => {
+    const a = run({ 4: { groupId: 'ABC', lostIn: [] }, 5: { groupId: 'ABC', lostIn: [] } });
+    expect(a.explanations[4]).toEqual({ kind: 'family' });
+    expect(a.explanations[5]).toEqual({ kind: 'single' });
+  });
+});
+
+describe('stored assignments', () => {
+  it('can rely on a new project having saved innovation ids', () => {
+    // Otherwise ids are invented on every reconcile, and anything keyed by
+    // them is orphaned when the project is reopened.
+    const p = createProject('t', { languages: ['A', 'B'], innovations: ['x', 'y'], matrix: [[1, 0], [0, 1]] });
+    const ids = p.innovationMeta!.map((m) => m.id);
+    expect(new Set(ids).size).toBe(2);
+    expect(parseProject(serializeProject(p)).innovationMeta!.map((m) => m.id)).toEqual(ids);
+  });
+
+  const base = createProject('t', {
+    languages: ['Anu', 'Beri', 'Cawa'],
+    innovations: ['x', 'y'],
+    matrix: [[1, 1, 0], [0, 1, 1]],
+  });
+  const setup = () => {
+    let p = addHypothesis(base, 'h');
+    const hid = activeHypothesis(p)!.id;
+    const added = addGroup(p, hid, { name: 'g', kind: 'subgroup', members: ['Anu', 'Beri', 'Cawa'] });
+    p = added.project;
+    const innovationId = p.innovationMeta![0]!.id;
+    p = assignInnovation(p, hid, innovationId, { groupId: added.id, lostIn: ['Cawa'] });
+    return { p, hid, gid: added.id, innovationId };
+  };
+
+  it('resolves to rows and indices, counting assignments to missing groups', () => {
+    const { p, innovationId } = setup();
+    const h = activeHypothesis(p)!;
+    const { assignmentOf, stale } = resolveAssignments(h, [innovationId, 'other'], ['Anu', 'Beri', 'Cawa']);
+    expect(assignmentOf(0)).toEqual({ groupId: h.groups[0]!.id, lostIn: [2] });
+    expect(assignmentOf(1)).toBeUndefined();
+    expect(stale).toBe(0);
+    const orphaned = resolveAssignments({ ...h, groups: [] }, [innovationId], ['Anu']);
+    expect(orphaned.stale).toBe(1);
+  });
+
+  it('clears an assignment, and drops those of a deleted group', () => {
+    const { p, hid, gid, innovationId } = setup();
+    expect(assignInnovation(p, hid, innovationId, null).hypotheses![0]!.assignments).toEqual({});
+    expect(removeGroup(p, hid, gid).hypotheses![0]!.assignments).toEqual({});
+  });
+
+  it('carries assignments into a copy, re-pointed at the copied groups', () => {
+    const { p, hid, innovationId } = setup();
+    const copy = activeHypothesis(duplicateHypothesis(p, hid, 'copy'))!;
+    expect(copy.assignments![innovationId]).toEqual({ groupId: copy.groups[0]!.id, lostIn: ['Cawa'] });
+  });
+
+  it('follows language renames and deletions, and forgets deleted innovations', () => {
+    const { p, innovationId } = setup();
+    const renamed = renameLanguage(p, 2, 'Kawa');
+    expect(activeHypothesis(renamed)!.assignments![innovationId]!.lostIn).toEqual(['Kawa']);
+    const dropped = removeLanguage(p, 2);
+    expect(activeHypothesis(dropped)!.assignments![innovationId]!.lostIn).toEqual([]);
+    const forgotten = removeInnovation(p, 0);
+    expect(activeHypothesis(forgotten)!.assignments).toEqual({});
+  });
+
+  it('survives save and load, dropping malformed entries', () => {
+    const { p, innovationId } = setup();
+    const raw = JSON.parse(serializeProject(p));
+    raw.hypotheses[0].assignments.junk = 'nope';
+    raw.hypotheses[0].assignments.nogroup = { lostIn: ['Anu'] };
+    const loaded = parseProject(JSON.stringify(raw));
+    expect(Object.keys(activeHypothesis(loaded)!.assignments!)).toEqual([innovationId]);
   });
 });

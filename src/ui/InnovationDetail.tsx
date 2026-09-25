@@ -3,16 +3,31 @@ import {
   INNOVATION_TYPES, TYPE_LABELS, typeOf, type InnovationType,
 } from '../core/innovationTypes.js';
 import type { InnovationMeta } from '../data/innovationMeta.js';
+import type { HypothesisGroup, StoredAssignment } from '../data/hypothesis.js';
+import { RELATION_LABELS, type Explanation } from '../core/hypothesis.js';
+import { describeExplanation } from './HypothesisPanel.js';
 import {
   LEXICAL_STATUSES, LEXICAL_STATUS_HELP, LEXICAL_STATUS_LABELS, assessQuality, labelQuality,
   type Correspondences, type LexicalStatus, type Quality,
 } from '../core/quality.js';
 import { QUALITY_COLOUR, QualityMark } from './QualityMark.js';
 
+/** The active hypothesis, as it bears on this innovation. */
+export interface HypothesisContext {
+  name: string;
+  groups: HypothesisGroup[];
+  /** How the hypothesis currently explains it; 'filtered' if a type filter excludes it. */
+  explanation: Explanation | 'filtered' | null;
+  assignment?: StoredAssignment;
+  /** Explain it by a group (null: back to computed), with losses by label. */
+  onAssign: (groupId: string | null, lostIn?: string[]) => void;
+}
+
 export interface InnovationDetailProps {
   dataset: Dataset;
   meta: InnovationMeta[];
   row: number;
+  hypothesis?: HypothesisContext;
   onRename: (label: string) => void;
   onUpdate: (changes: Partial<InnovationMeta>) => void;
   onClose: () => void;
@@ -30,7 +45,7 @@ export interface InnovationDetailProps {
  * distributions, and anything richer belongs in CLDF.
  */
 export function InnovationDetail({
-  dataset, meta, row, onRename, onUpdate, onClose,
+  dataset, meta, row, hypothesis, onRename, onUpdate, onClose,
 }: InnovationDetailProps) {
   const label = dataset.innovations[row] ?? '';
   const current = meta[row];
@@ -78,6 +93,10 @@ export function InnovationDetail({
       )}
 
       <QualitySection label={label} type={type} current={current} onUpdate={onUpdate} />
+
+      {hypothesis && (
+        <HypothesisSection context={hypothesis} languages={dataset.languages} cells={dataset.matrix[row] ?? []} />
+      )}
 
       <div style={S.pair}>
         <label style={S.field}>
@@ -201,6 +220,89 @@ export function InnovationDetail({
 }
 
 /**
+ * How the active hypothesis explains this innovation, and the place to say
+ * otherwise. Losses are ticked per member; one the matrix contradicts (the
+ * language has the innovation) cannot be ticked.
+ */
+function HypothesisSection({ context, languages, cells }: {
+  context: HypothesisContext;
+  languages: string[];
+  cells: (0 | 1 | null)[];
+}) {
+  const { name, groups, explanation, assignment, onAssign } = context;
+  const nameOf = (l: number) => languages[l] ?? `#${l}`;
+  const groupName = (id: string) => {
+    const g = groups.find((x) => x.id === id);
+    return g ? (g.name || g.members.join(' + ')) : id;
+  };
+  const group = assignment && groups.find((g) => g.id === assignment.groupId);
+  const lost = new Set(assignment?.lostIn ?? []);
+  const has = (label: string) => cells[languages.indexOf(label)] === 1;
+  const detail = explanation && explanation !== 'filtered' && 'assigned' in explanation
+    ? explanation.assigned : undefined;
+
+  return (
+    <fieldset style={S.group}>
+      <legend style={S.legend}>in hypothesis “{name}”</legend>
+      <p style={S.explained}>
+        {explanation === 'filtered'
+          ? 'Excluded by the current type filter, so the hypothesis does not see it.'
+          : explanation
+            ? <>{assignment ? 'Assigned: ' : 'Computed: '}{describeExplanation(explanation, groupName, nameOf)}.</>
+            : 'No analysis.'}
+      </p>
+      {explanation !== 'filtered' && (
+        <label style={S.field}>
+          <span style={S.labelText}>explained by</span>
+          <select
+            value={assignment?.groupId ?? ''}
+            onChange={(e) => onAssign(e.target.value || null)}
+            style={S.input}
+          >
+            <option value="">computed (no assignment)</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>{g.name || g.members.join(' + ')} — {RELATION_LABELS[g.kind]}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      {group?.kind === 'subgroup' && (
+        <div style={S.field}>
+          <span style={S.labelText}>lost in</span>
+          <div style={S.lossGrid}>
+            {group.members.map((m) => (
+              <label key={m} style={{ ...S.loss, ...(has(m) ? S.lossDisabled : {}) }} title={has(m) ? `${m} has it` : undefined}>
+                <input
+                  type="checkbox"
+                  checked={lost.has(m)}
+                  disabled={has(m) && !lost.has(m)}
+                  onChange={() => onAssign(group.id, group.members.filter((x) =>
+                    (x === m ? !lost.has(m) : lost.has(x))))}
+                />
+                {m}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+      {detail && detail.unrecorded.length > 0 && (
+        <p style={S.flag}>! Absent from {detail.unrecorded.map(nameOf).join(', ')} with no loss recorded.</p>
+      )}
+      {detail && detail.contradicted.length > 0 && (
+        <p style={S.flag}>! Recorded as lost in {detail.contradicted.map(nameOf).join(', ')}, which {detail.contradicted.length === 1 ? 'has' : 'have'} it.</p>
+      )}
+      {detail && detail.noneInside && <p style={S.flag}>! No member of this group has it.</p>}
+      {detail && detail.outside.length > 0 && (
+        <p style={group?.kind === 'subgroup' ? S.hint : S.flag}>
+          {group?.kind === 'subgroup' ? '' : '! '}Also in {detail.outside.map(nameOf).join(', ')}
+          {group?.kind === 'subgroup' ? ', outside the subgroup: counted as borrowing.' : ', outside the group.'}
+        </p>
+      )}
+    </fieldset>
+  );
+}
+
+/**
  * Quality, kept apart from type: Smith's (2025) replacement distinction lives
  * inside the lexical type, and correspondences apply to any reflex set. The
  * judgement line shows what the fields add up to, and why.
@@ -292,6 +394,11 @@ function QualitySection({ label, type, current, onUpdate }: {
 }
 
 const S: Record<string, React.CSSProperties> = {
+  explained: { margin: '0.15rem 0 0', fontSize: '0.72rem', lineHeight: 1.4 },
+  lossGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '0.1rem 0.4rem' },
+  loss: { display: 'flex', gap: '0.25rem', alignItems: 'center', fontSize: '0.72rem' },
+  lossDisabled: { color: '#bbb' },
+  flag: { color: '#b00', fontSize: '0.7rem', margin: '0.25rem 0 0', lineHeight: 1.4 },
   judgement: { display: 'flex', gap: '0.3rem', alignItems: 'baseline', fontSize: '0.74rem' },
   reason: { color: '#777' },
   panel: {

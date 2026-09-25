@@ -13,7 +13,7 @@
  * readings of the same four languages.
  */
 
-import type { GroupSpec, RelationKind } from '../core/hypothesis.js';
+import type { Assignment, GroupSpec, RelationKind } from '../core/hypothesis.js';
 import { RELATION_KINDS } from '../core/hypothesis.js';
 import type { Project } from './project.js';
 
@@ -26,10 +26,23 @@ export interface HypothesisGroup {
   notes?: string;
 }
 
+/** The analyst's explanation of one innovation within a hypothesis. */
+export interface StoredAssignment {
+  groupId: string;
+  /** Language labels in which the innovation is claimed to have been lost. */
+  lostIn?: string[];
+}
+
 export interface Hypothesis {
   id: string;
   name: string;
   groups: HypothesisGroup[];
+  /**
+   * Keyed by innovation id (InnovationMeta.id), so assignments survive
+   * relabelling and reordering of innovations. Per hypothesis: the same
+   * innovation is inherited in one reading and borrowed in another.
+   */
+  assignments?: Record<string, StoredAssignment>;
   notes?: string;
 }
 
@@ -72,8 +85,23 @@ export function duplicateHypothesis(project: Project, id: string, name: string):
     ...source,
     id: newId('h'),
     name,
-    groups: source.groups.map((g) => ({ ...g, id: newId('g'), members: [...g.members] })),
+    groups: [],
+    assignments: undefined,
   };
+  // Fresh group ids, and assignments carried across to them.
+  const idMap = new Map<string, string>();
+  copy.groups = source.groups.map((g) => {
+    const id = newId('g');
+    idMap.set(g.id, id);
+    return { ...g, id, members: [...g.members] };
+  });
+  if (source.assignments) {
+    copy.assignments = Object.fromEntries(
+      Object.entries(source.assignments)
+        .filter(([, a]) => idMap.has(a.groupId))
+        .map(([k, a]) => [k, { ...a, groupId: idMap.get(a.groupId)!, lostIn: a.lostIn?.slice() }]),
+    );
+  }
   return {
     ...project,
     hypotheses: [...(project.hypotheses ?? []), copy],
@@ -126,10 +154,81 @@ export function updateGroup(
   }));
 }
 
+/** Removing a group also drops what was assigned to it. */
 export function removeGroup(project: Project, hypothesisId: string, groupId: string): Project {
   return mapHypothesis(project, hypothesisId, (h) => ({
-    ...h, groups: h.groups.filter((g) => g.id !== groupId),
+    ...h,
+    groups: h.groups.filter((g) => g.id !== groupId),
+    assignments: h.assignments && Object.fromEntries(
+      Object.entries(h.assignments).filter(([, a]) => a.groupId !== groupId),
+    ),
   }));
+}
+
+/**
+ * Explain an innovation by a group, optionally with losses; `null` clears the
+ * assignment, handing it back to the computed explanation.
+ */
+export function assignInnovation(
+  project: Project,
+  hypothesisId: string,
+  innovationId: string,
+  assignment: StoredAssignment | null,
+): Project {
+  return mapHypothesis(project, hypothesisId, (h) => {
+    const assignments = { ...(h.assignments ?? {}) };
+    if (assignment) {
+      assignments[innovationId] = {
+        groupId: assignment.groupId,
+        ...(assignment.lostIn?.length ? { lostIn: assignment.lostIn.slice() } : {}),
+      };
+    } else {
+      delete assignments[innovationId];
+    }
+    return { ...h, assignments };
+  });
+}
+
+/** Drop assignments for innovations that no longer exist. */
+export function forgetInnovation(
+  hypotheses: Hypothesis[] | undefined, innovationId: string,
+): Hypothesis[] | undefined {
+  return hypotheses?.map((h) => {
+    if (!h.assignments || !(innovationId in h.assignments)) return h;
+    const assignments = { ...h.assignments };
+    delete assignments[innovationId];
+    return { ...h, assignments };
+  });
+}
+
+/**
+ * Assignments as the analysis needs them: by row of the analysed dataset,
+ * with losses as language indices. Assignments to groups that no longer exist
+ * are left out and counted.
+ */
+export function resolveAssignments(
+  hypothesis: Hypothesis,
+  /** Innovation id of each row of the analysed dataset. */
+  rowIds: (string | undefined)[],
+  languages: string[],
+): { assignmentOf: (row: number) => Assignment | undefined; stale: number } {
+  const groupIds = new Set(hypothesis.groups.map((g) => g.id));
+  const index = new Map(languages.map((l, i) => [l, i]));
+  const byId = hypothesis.assignments ?? {};
+  let stale = 0;
+  const resolved = rowIds.map((id) => {
+    const a = id ? byId[id] : undefined;
+    if (!a) return undefined;
+    if (!groupIds.has(a.groupId)) {
+      stale++;
+      return undefined;
+    }
+    return {
+      groupId: a.groupId,
+      lostIn: (a.lostIn ?? []).filter((l) => index.has(l)).map((l) => index.get(l)!),
+    };
+  });
+  return { assignmentOf: (row) => resolved[row], stale };
 }
 
 /**
@@ -160,14 +259,22 @@ export function resolveGroups(
 // ---------------------------------------------------------------------------
 // Cascades from language edits
 
+function mapLosses(
+  h: Hypothesis, fn: (lostIn: string[]) => string[],
+): Hypothesis['assignments'] {
+  return h.assignments && Object.fromEntries(
+    Object.entries(h.assignments).map(([k, a]) => [k, a.lostIn ? { ...a, lostIn: fn(a.lostIn) } : a]),
+  );
+}
+
 export function renameLanguageInHypotheses(
   hypotheses: Hypothesis[] | undefined, from: string, to: string,
 ): Hypothesis[] | undefined {
+  const swap = (m: string) => (m === from ? to : m);
   return hypotheses?.map((h) => ({
     ...h,
-    groups: h.groups.map((g) => ({
-      ...g, members: g.members.map((m) => (m === from ? to : m)),
-    })),
+    groups: h.groups.map((g) => ({ ...g, members: g.members.map(swap) })),
+    assignments: mapLosses(h, (lost) => lost.map(swap)),
   }));
 }
 
@@ -177,6 +284,7 @@ export function removeLanguageFromHypotheses(
   return hypotheses?.map((h) => ({
     ...h,
     groups: h.groups.map((g) => ({ ...g, members: g.members.filter((m) => m !== label) })),
+    assignments: mapLosses(h, (lost) => lost.filter((m) => m !== label)),
   }));
 }
 
@@ -208,7 +316,20 @@ export function sanitizeHypotheses(raw: unknown): Hypothesis[] | undefined {
         notes: str(go.notes),
       });
     }
-    out.push({ id, name: str(o.name) ?? 'hypothesis', groups, notes: str(o.notes) });
+    let assignments: Record<string, StoredAssignment> | undefined;
+    if (typeof o.assignments === 'object' && o.assignments !== null) {
+      assignments = {};
+      for (const [k, v] of Object.entries(o.assignments as Record<string, unknown>)) {
+        if (typeof v !== 'object' || v === null) continue;
+        const a = v as Record<string, unknown>;
+        const groupId = str(a.groupId);
+        if (!groupId) continue;
+        const lostIn = Array.isArray(a.lostIn)
+          ? a.lostIn.filter((m): m is string => typeof m === 'string') : undefined;
+        assignments[k] = { groupId, ...(lostIn?.length ? { lostIn } : {}) };
+      }
+    }
+    out.push({ id, name: str(o.name) ?? 'hypothesis', groups, assignments, notes: str(o.notes) });
   }
   return out;
 }

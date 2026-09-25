@@ -75,7 +75,13 @@ export function createProject(
   dataset: Dataset,
   coordinates?: LanguageCoordinates,
 ): Project {
-  return { version: PROJECT_VERSION, name, dataset, settings: { ...DEFAULT_SETTINGS }, coordinates };
+  return {
+    version: PROJECT_VERSION, name, dataset, settings: { ...DEFAULT_SETTINGS }, coordinates,
+    // Ids from the start: anything keyed by innovation (orderings, hypothesis
+    // assignments) must refer to ids that are saved, not ones made up afresh
+    // each time the metadata is reconciled.
+    innovationMeta: reconcile(undefined, dataset.innovations.length),
+  };
 }
 
 export function serializeProject(project: Project): string {
