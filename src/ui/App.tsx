@@ -13,6 +13,13 @@ import {
 import { ImportReport, type ImportReportData } from './ImportReport.js';
 import { FormatGuide } from './FormatGuide.js';
 import { QualityLegend } from './QualityLegend.js';
+import { HypothesisLegend, HypothesisPanel } from './HypothesisPanel.js';
+import { analyseHypothesis } from '../core/hypothesis.js';
+import { hypothesisScene } from '../render/hypothesisScene.js';
+import {
+  activeHypothesis, addGroup, addHypothesis, duplicateHypothesis, removeGroup, removeHypothesis,
+  renameHypothesis, resolveGroups, setActiveHypothesis, updateGroup,
+} from '../data/hypothesis.js';
 import {
   createProject, downloadProject, parseProject, resolveOrder, type Project,
 } from '../data/project.js';
@@ -297,6 +304,61 @@ export function App() {
     [scene, visible],
   );
 
+  // --- Hypotheses -----------------------------------------------------------
+  const [view, setView] = useState<'computed' | 'hypothesis'>('computed');
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const [highlightedGroup, setHighlightedGroup] = useState<string | null>(null);
+  const hypothesis = project ? activeHypothesis(project) : null;
+
+  const resolvedHypothesis = useMemo(
+    () => (hypothesis && dataset ? resolveGroups(hypothesis, dataset.languages) : null),
+    [hypothesis, dataset],
+  );
+
+  // Checked against the scored dataset, so the type filter decides what
+  // evidence counts here exactly as it does for the computed diagram.
+  const hypothesisAnalysis = useMemo(
+    () => (resolvedHypothesis && scored
+      ? analyseHypothesis(scored.dataset, resolvedHypothesis.specs, classOfScored, layout?.order)
+      : null),
+    [resolvedHypothesis, scored, classOfScored, layout?.order],
+  );
+
+  const hypothesisDrawing = useMemo(() => {
+    if (!layout || !scored || !hypothesis || !resolvedHypothesis) return null;
+    const names = new Map(hypothesis.groups.map((g) => [g.id, g.name || g.members.join(' + ')]));
+    return hypothesisScene(layout, scored.g, resolvedHypothesis.specs, (id) => names.get(id) ?? id);
+  }, [layout, scored, hypothesis, resolvedHypothesis]);
+
+  const showingHypothesis = view === 'hypothesis';
+
+  const hypothesisSubtitle = useMemo(() => {
+    if (!hypothesis || !hypothesisAnalysis) return '';
+    const n = (k: string) => hypothesis.groups.filter((g) => g.kind === k).length;
+    const plural = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+    const unexplained = hypothesisAnalysis.residue.length;
+    return [
+      `hypothesis "${hypothesis.name}": authored, not computed`,
+      plural(n('subgroup'), 'subgroup', 'subgroups'),
+      plural(n('linkage'), 'linkage', 'linkages'),
+      plural(n('contact'), 'contact zone', 'contact zones'),
+      hypothesisAnalysis.extraGains === null
+        ? 'subgroups do not form a tree'
+        : `tree needs ${hypothesisAnalysis.extraGains} extra origins (${hypothesisAnalysis.extraGainsFlat} with no subgroups)`,
+      `${unexplained} of ${hypothesisAnalysis.informative} informative innovations unexplained`,
+      `${LAYOUT_LABELS[settings!.layoutKind]} layout`,
+    ].join(' · ');
+  }, [hypothesis, hypothesisAnalysis, settings]);
+
+  const hypothesisEdit = useCallback(
+    (fn: (p: Project, id: string) => Project, label: string, key?: string) =>
+      history.set((p) => {
+        const h = p && activeHypothesis(p);
+        return p && h ? fn(p, h.id) : p;
+      }, label, key),
+    [history],
+  );
+
   const selectedSubgroup = scene?.contours.find((c) => c.key === selected)?.subgroup ?? null;
 
   /**
@@ -497,6 +559,18 @@ export function App() {
             </button>
           ))}
         </span>
+        <span style={S.modes} title="Computed glottometry, or your authored hypothesis">
+          {(['computed', 'hypothesis'] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              style={{ ...S.mode, ...(view === v ? S.modeActive : {}) }}
+            >
+              {v}
+            </button>
+          ))}
+        </span>
+        {!showingHypothesis && <>
         <label style={S.toggle} title="Show the diagram's connected components">
           <input
             type="checkbox"
@@ -527,16 +601,28 @@ export function App() {
           />
           high-quality survival
         </label>
+        </>}
         {edited && <button onClick={resetLayout} title="Discard manual positions">reset layout</button>}
         <span style={S.spacer} />
         <button onClick={() => downloadProject(project)}>save project</button>
         <button
-          disabled={!exportScene}
-          onClick={() => exportScene && downloadSvg(exportScene, `${project.name}-glottometry`, {
-            title: `Glottometric diagram — ${project.name}`,
-            subtitle: exportSubtitle,
-            nodeFill,
-          })}
+          disabled={showingHypothesis ? !hypothesisDrawing : !exportScene}
+          onClick={() => {
+            if (showingHypothesis) {
+              if (hypothesisDrawing && hypothesis) {
+                downloadSvg(hypothesisDrawing, `${project.name}-hypothesis-${hypothesis.name}`, {
+                  title: `Hypothesis: ${hypothesis.name} — ${project.name}`,
+                  subtitle: hypothesisSubtitle,
+                });
+              }
+            } else if (exportScene) {
+              downloadSvg(exportScene, `${project.name}-glottometry`, {
+                title: `Glottometric diagram — ${project.name}`,
+                subtitle: exportSubtitle,
+                nodeFill,
+              });
+            }
+          }}
         >
           export SVG
         </button>
@@ -579,7 +665,10 @@ export function App() {
             </span>
           </p>
 
-          {(showQuality || showSurvival) && mode === 'diagram' && (
+          {showingHypothesis && hypothesis && mode === 'diagram' && (
+            <HypothesisLegend name={hypothesis.name} />
+          )}
+          {!showingHypothesis && (showQuality || showSurvival) && mode === 'diagram' && (
             <QualityLegend
               lines={showQuality}
               survival={highOnly && {
@@ -681,12 +770,12 @@ export function App() {
 
             <div style={S.stage}>
               <Diagram
-                scene={scene}
-                highlighted={highlighted}
-                  selected={selected}
-                  hidden={hidden}
-                  onHover={setHighlighted}
-                  onSelect={setSelected}
+                scene={showingHypothesis && hypothesisDrawing ? hypothesisDrawing : scene}
+                highlighted={showingHypothesis ? highlightedGroup : highlighted}
+                selected={showingHypothesis ? selectedGroup : selected}
+                hidden={showingHypothesis ? undefined : hidden}
+                onHover={showingHypothesis ? setHighlightedGroup : setHighlighted}
+                onSelect={showingHypothesis ? setSelectedGroup : setSelected}
                 onReorder={onReorder}
                 onMove={onMove}
                 onDragEnd={history.seal}
@@ -694,7 +783,40 @@ export function App() {
               />
             </div>
 
-            {showFragmentation && !selectedSubgroup ? (
+            {showingHypothesis ? (
+              <HypothesisPanel
+                hypotheses={project.hypotheses ?? []}
+                active={hypothesis}
+                languages={dataset.languages}
+                innovations={scored.dataset.innovations}
+                analysis={hypothesisAnalysis}
+                unknown={resolvedHypothesis?.unknown ?? []}
+                computed={visible.map((c) => ({ key: c.key, names: c.subgroup.memberNames }))}
+                selected={selectedGroup}
+                onSelect={setSelectedGroup}
+                onHover={setHighlightedGroup}
+                onNew={(name) => edit((p) => addHypothesis(p, name), 'new hypothesis')}
+                onDuplicate={() => hypothesisEdit(
+                  (p, id) => duplicateHypothesis(p, id, `${activeHypothesis(p)!.name} (copy)`),
+                  'copy hypothesis',
+                )}
+                onRename={(name) => hypothesisEdit(
+                  (p, id) => renameHypothesis(p, id, name), 'rename hypothesis', 'rename-hypothesis',
+                )}
+                onDelete={() => hypothesisEdit((p, id) => removeHypothesis(p, id), 'delete hypothesis')}
+                onSetActive={(id) => edit((p) => setActiveHypothesis(p, id), 'switch hypothesis')}
+                onAddGroup={(group) => hypothesisEdit(
+                  (p, id) => addGroup(p, id, group).project, `add ${group.kind}`,
+                )}
+                onUpdateGroup={(groupId, changes) => hypothesisEdit(
+                  (p, id) => updateGroup(p, id, groupId, changes), 'edit group',
+                )}
+                onRemoveGroup={(groupId) => {
+                  if (selectedGroup === groupId) setSelectedGroup(null);
+                  hypothesisEdit((p, id) => removeGroup(p, id, groupId), 'delete group');
+                }}
+              />
+            ) : showFragmentation && !selectedSubgroup ? (
               <ChronologyPanel
                 stages={stages}
                 current={stage}

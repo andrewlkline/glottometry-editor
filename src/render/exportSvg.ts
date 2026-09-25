@@ -52,9 +52,13 @@ export function exportSvg(scene: Scene, opts: ExportOptions = {}): string {
   lines.push('  <g id="isoglosses" fill="none" stroke-linejoin="round" stroke-linecap="round">');
   for (const c of contours) {
     const { sigma, kappa, epsilon, memberNames } = c.subgroup;
-    const label = memberNames.join(' + ');
+    const members = memberNames.join(' + ');
+    const label = c.hypothesis?.name || members;
     lines.push(
-      `    <g data-subgroup="${esc(label)}" ` +
+      `    <g data-subgroup="${esc(members)}" ` +
+        (c.hypothesis
+          ? `data-kind="${c.hypothesis.kind}" data-name="${esc(c.hypothesis.name)}" `
+          : '') +
         `data-sigma="${sigma.toFixed(3)}" data-kappa="${kappa.toFixed(3)}" ` +
         `data-epsilon="${epsilon.toFixed(3)}" ` +
         (c.quality ? `data-support="${c.quality.support}" ` : '') +
@@ -66,7 +70,9 @@ export function exportSvg(scene: Scene, opts: ExportOptions = {}): string {
         '>',
     );
     lines.push(
-      `      <title>${esc(label)} — ς ${sigma.toFixed(2)}, κ ${kappa.toFixed(2)}, ε ${epsilon.toFixed(2)}</title>`,
+      c.hypothesis
+        ? `      <title>${esc(label)} — ${c.hypothesis.kind}: ${esc(members)}</title>`
+        : `      <title>${esc(label)} — ς ${sigma.toFixed(2)}, κ ${kappa.toFixed(2)}, ε ${epsilon.toFixed(2)}</title>`,
     );
     for (const d of c.paths) {
       lines.push(`      <path d="${d}"/>`);

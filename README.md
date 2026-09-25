@@ -357,8 +357,8 @@ note can never affect a score, and the CSV round-trip is untouched.
 
 The edit operations are a module of their own because they cascade: a language
 is referenced from the matrix columns, the coordinates, the manual order, the
-manual positions **and** every innovation's reflexes, so renaming or deleting
-one has to reach all five.
+manual positions, every innovation's reflexes **and** every hypothesis group,
+so renaming or deleting one has to reach all six.
 
 ### Importing CSVs: validation and feedback
 
@@ -398,6 +398,55 @@ Decisions that look odd but are deliberate:
 
 `parseMaramaCsv`/`parseCoordinatesCsv` are thin wrappers that throw on any
 blocking issue; the UI calls the checker directly so it can show everything.
+
+### Hybrid hypotheses (tree + linkage + contact zone)
+
+The **computed | hypothesis** switch beside diagram/data. A hypothesis is
+*authored*: named groups, each a **subgroup**, **linkage** or **contact zone**
+(Smith 2025's three relation types), drawn as Kaufman (2026: 7) recommends
+after Edwards (2021) — a tree with areal groupings over it. A project can hold
+several, because the point is competition between readings (Kaufman's (4)
+vs (5), which `tests/hypothesis.test.ts` reproduces: one extra origin vs two).
+
+**Epistemic line, kept deliberately:** the matrix never proposes a hypothesis,
+and a hypothesis never touches a glottometric score. The view uses its own
+colours (slate subgroup, blue linkage, dashed grey contact zone) at fixed
+widths, the legend says "authored, not computed", and exports are titled
+"Hypothesis: …" with that phrase in the caption and `data-kind`/`data-name` on
+each group.
+
+What the matrix answers back (`core/hypothesis.ts`, per group and overall):
+
+- **Tree validity** — subgroups must nest or be disjoint.
+- **Extra origins** — per innovation, the fewest independent gains on the tree
+  if nothing is ever lost (maximal clades inside its distribution); the sum of
+  gains − 1, shown against the same count with no subgroups. A lower bound:
+  whether a gap is a loss is the analyst's call, so it is never assumed.
+- **Explained vs unexplained** — an innovation is inherited if it is exactly a
+  subgroup's distribution, else within the smallest linkage/contact zone
+  containing it, else **residue**, listed with a hint (which subgroup it falls
+  within and who lacks it, or how many origins it needs).
+- **Per subgroup** — defining (exclusive) innovations and their quality; gaps
+  (in ≥ half the members, 0 in others, not explained by a lower subgroup);
+  **leakage** (Kaufman's "crispness of borders": in every member and some
+  outsider, *excluding* an ancestor subgroup's or the whole family's
+  innovations, which are inherited, not leaked); conflicts.
+- **Per linkage / contact zone** — internal innovations and their quality, and
+  the **chain test**: the ordering that makes the most internal innovations
+  unbroken runs (Smith's step-ladder / centre-of-diffusion vs "random"). Exact
+  up to 7 members; above that, greedy chains from every member plus the layout
+  order, improved by moves and segment reversals — never overstates, found the
+  perfect chain in 300/300 random step-ladders of 8–16 lects in ≤ 14 ms. It
+  assumes a chain: a genuinely 2-D network can fail it and still be a linkage,
+  and the finding says so.
+
+**Set logic, not probabilities:** checks use definite cells, unknown = wildcard
+that falls whichever way fits the claim (generous to the hypothesis). They run
+on the *scored* dataset, so type filters apply exactly as in the computed view.
+Groups store members by **label**; `edit.ts` cascades renames/deletions, and
+labels that no longer exist are reported, not guessed. Contours are keyed by
+group id (`SceneOptions.keyOf`) because a linkage may have exactly a subgroup's
+members (Smith's fig. 8).
 
 ### The fragmentation view
 
@@ -562,8 +611,13 @@ contour-engine design, phasing and risks.
       high-quality survival overlay.
 - [ ] Survival uses the main threshold; a separate or relative survival
       threshold may be wanted once real assessed data shows how harsh it is.
-- [ ] Hybrid tree + linkage + contact-zone hypotheses over the same matrix
-      (see the discussion of Kaufman 2026 / Edwards 2021); needs the above.
+- [x] Hybrid hypotheses, phase 1: authored subgroups / linkages / contact
+      zones with checks against the matrix, drawn with the contour engine.
+- [ ] Hybrid phase 2: a tree drawing (dendrogram over the chain, defining
+      innovations at nodes) with leaf orders constrained to the tree; explicit
+      per-innovation assignments and "lost in X" annotations.
+- [ ] Hybrid phase 3: side-by-side comparison of hypotheses; an optional
+      starting tree from the strongest compatible computed subgroups.
 
 ## References
 

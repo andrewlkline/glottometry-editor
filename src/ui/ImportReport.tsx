@@ -87,12 +87,12 @@ const ICON_STYLE: Record<Severity, React.CSSProperties> = {
 
 const S: Record<string, React.CSSProperties> = {
   box: {
-    border: '1px solid', borderRadius: 6, padding: '0.55rem 0.7rem',
+    borderRadius: 6, padding: '0.55rem 0.7rem',
     margin: '0.7rem 0 0', fontSize: '0.78rem',
   },
-  boxError: { borderColor: '#e8b4b4', background: '#fff6f6' },
-  boxWarn: { borderColor: '#f2e2c4', background: '#fffaf0' },
-  boxOk: { borderColor: '#dde', background: '#f8f8fc' },
+  boxError: { border: '1px solid #e8b4b4', background: '#fff6f6' },
+  boxWarn: { border: '1px solid #f2e2c4', background: '#fffaf0' },
+  boxOk: { border: '1px solid #dde', background: '#f8f8fc' },
   head: { display: 'flex', gap: '0.6rem', alignItems: 'baseline', flexWrap: 'wrap' },
   spacer: { flex: 1 },
   link: {

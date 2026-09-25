@@ -47,6 +47,8 @@ export interface ContourShape {
    * geometry; absent when the overlay is off.
    */
   quality?: { support: 'high' | 'low' | 'unassessed'; survives?: boolean };
+  /** Set when the contour is a hypothesis group rather than a computed subgroup. */
+  hypothesis?: { kind: 'subgroup' | 'linkage' | 'contact'; name: string };
 }
 
 export interface Scene {
@@ -75,6 +77,12 @@ export interface SceneOptions {
   pagePadding?: number;
   /** Grid resolution for blob contours. Smaller is finer and slower. */
   blobResolution?: number;
+  /**
+   * Contour key for the i-th subgroup. Defaults to the member indices, which
+   * are unique among computed subgroups but not among a hypothesis's groups:
+   * a linkage can have exactly a subgroup's members (Smith 2025, fig. 8).
+   */
+  keyOf?: (subgroup: Subgroup, index: number) => string;
 }
 
 export function buildScene(
@@ -111,7 +119,7 @@ function chainScene(layout: Layout, subgroups: Subgroup[], opts: SceneOptions): 
       maxCornerRadius: nodeRadius * 2.4,
     });
     return {
-      key: subgroup.members.join(','),
+      key: opts.keyOf?.(subgroup, i) ?? subgroup.members.join(','),
       subgroup,
       paths,
       style: contourStyle(subgroup.sigma, subgroup.kappa, { maxSigma }),
@@ -181,7 +189,7 @@ function planarScene(layout: Layout, subgroups: Subgroup[], opts: SceneOptions):
     });
 
     return {
-      key: subgroup.members.join(','),
+      key: opts.keyOf?.(subgroup, i) ?? subgroup.members.join(','),
       subgroup,
       paths,
       style: contourStyle(subgroup.sigma, subgroup.kappa, { maxSigma }),

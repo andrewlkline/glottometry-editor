@@ -17,6 +17,7 @@ import type { InnovationType } from '../core/innovationTypes.js';
 import type { LayoutKind } from '../core/layout.js';
 import type { LanguageCoordinates } from './maramaCsv.js';
 import { reconcile, type InnovationMeta } from './innovationMeta.js';
+import { sanitizeHypotheses, type Hypothesis } from './hypothesis.js';
 
 export const PROJECT_VERSION = 1;
 
@@ -53,6 +54,13 @@ export interface Project {
   manualPositions?: Record<string, [number, number]>;
   /** Subgroup keys (comma-joined member indices) the user hid. */
   hidden?: string[];
+  /**
+   * Authored hybrid hypotheses — subgroups, linkages, contact zones — checked
+   * against the matrix but never feeding into its scores. See hypothesis.ts.
+   */
+  hypotheses?: Hypothesis[];
+  /** Which hypothesis the hypothesis view shows. */
+  activeHypothesis?: string;
 }
 
 export const DEFAULT_SETTINGS: ProjectSettings = {
@@ -142,6 +150,8 @@ export function parseProject(text: string): Project {
     manualOrder: Array.isArray(obj.manualOrder) ? (obj.manualOrder as string[]) : undefined,
     manualPositions: (obj.manualPositions ?? undefined) as Project['manualPositions'],
     hidden: Array.isArray(obj.hidden) ? (obj.hidden as string[]) : undefined,
+    hypotheses: sanitizeHypotheses(obj.hypotheses),
+    activeHypothesis: typeof obj.activeHypothesis === 'string' ? obj.activeHypothesis : undefined,
   };
 }
 

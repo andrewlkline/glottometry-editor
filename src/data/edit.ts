@@ -5,9 +5,9 @@
  * history without special handling.
  *
  * They exist as a layer of their own because a language is referenced from
- * five places — the matrix columns, the coordinates, the manual order, the
- * manual positions, and every innovation's reflexes — and renaming or deleting
- * one has to reach all of them. Doing that at the call site would guarantee
+ * six places — the matrix columns, the coordinates, the manual order, the
+ * manual positions, every innovation's reflexes, and every hypothesis group —
+ * and renaming or deleting one has to reach all of them. Doing that at the call site would guarantee
  * that some caller eventually forgets the reflexes and leaves orphaned keys
  * behind.
  */
@@ -15,6 +15,7 @@
 import type { Cell, Dataset } from '../core/types.js';
 import type { Project } from './project.js';
 import { emptyMeta, reconcile, type InnovationMeta } from './innovationMeta.js';
+import { removeLanguageFromHypotheses, renameLanguageInHypotheses } from './hypothesis.js';
 
 /** Cells cycle 1 → 0 → unknown, which is the order a coder works in. */
 export function nextCellValue(current: Cell): Cell {
@@ -149,6 +150,7 @@ export function removeLanguage(project: Project, column: number): Project {
     coordinates,
     manualPositions,
     manualOrder: project.manualOrder?.filter((l) => l !== label),
+    hypotheses: removeLanguageFromHypotheses(project.hypotheses, label),
     innovationMeta: project.innovationMeta?.map((m) => {
       if (!m.reflexes || !(label in m.reflexes)) return m;
       const reflexes = { ...m.reflexes };
@@ -183,6 +185,7 @@ export function renameLanguage(project: Project, column: number, label: string):
     coordinates: move(project.coordinates),
     manualPositions: move(project.manualPositions),
     manualOrder: project.manualOrder?.map((l) => (l === previous ? name : l)),
+    hypotheses: renameLanguageInHypotheses(project.hypotheses, previous, name),
     innovationMeta: project.innovationMeta?.map((m) =>
       (m.reflexes && previous in m.reflexes ? { ...m, reflexes: move(m.reflexes)! } : m)),
   };

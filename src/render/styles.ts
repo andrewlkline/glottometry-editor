@@ -126,3 +126,17 @@ export function fitLabel(
   const capacity = Math.floor((halfWidth * 2 - 10) / (fontSize * 0.55));
   return label.length <= capacity ? label : `${label.slice(0, Math.max(1, capacity - 1))}…`;
 }
+
+/**
+ * A hypothesis's groups, by relation type.
+ *
+ * Deliberately not the glottometric red: a hypothesis is authored, and a
+ * reader should never mistake one for computed output. Widths are fixed
+ * rather than scaled by ς for the same reason — the diagram shows what is
+ * claimed; how well the evidence fits is in the checks.
+ */
+export const HYPOTHESIS_STYLE: Record<'subgroup' | 'linkage' | 'contact', ContourStyle> = {
+  subgroup: { stroke: '#1f2d3d', strokeWidth: 3.2 },
+  linkage: { stroke: '#2f6db3', strokeWidth: 2.6 },
+  contact: { stroke: '#8c8c8c', strokeWidth: 2.2, dasharray: '6 6' },
+};
