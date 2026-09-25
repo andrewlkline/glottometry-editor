@@ -345,5 +345,8 @@ describe('drawing a hypothesis', () => {
     expect(svg).toMatch(/data-kind="contact" data-name="East"/);
     expect(svg).toMatch(/<title>East — contact: B \+ C \+ D<\/title>/);
     expect(svg).toMatch(/stroke-dasharray="6 6"/);
+    const described = exportSvg(scene, { method: 'A hybrid hypothesis' });
+    expect(described).toMatch(/<desc>A hybrid hypothesis\. Drawn by/);
+    expect(exportSvg(scene)).toMatch(/after Kalyan &amp; François \(2018\)/);
   });
 });

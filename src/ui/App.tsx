@@ -613,6 +613,8 @@ export function App() {
                 downloadSvg(hypothesisDrawing, `${project.name}-hypothesis-${hypothesis.name}`, {
                   title: `Hypothesis: ${hypothesis.name} — ${project.name}`,
                   subtitle: hypothesisSubtitle,
+                  method: 'A hybrid hypothesis (subgroups, linkages, contact zones), '
+                    + 'checked against a glottometric innovations matrix',
                 });
               }
             } else if (exportScene) {

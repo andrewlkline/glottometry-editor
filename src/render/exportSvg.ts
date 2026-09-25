@@ -24,11 +24,16 @@ export interface ExportOptions {
   subtitle?: string;
   /** Per-language node fill, matching what the screen shows. */
   nodeFill?: (language: number) => string | undefined;
+  /** What the figure is, for the description; defaults to the method credit. */
+  method?: string;
 }
 
 export function exportSvg(scene: Scene, opts: ExportOptions = {}): string {
   const { layout, contours, width, height, viewBox } = scene;
-  const { title = 'Glottometric diagram', subtitle, nodeFill } = opts;
+  const {
+    title = 'Glottometric diagram', subtitle, nodeFill,
+    method = 'Historical Glottometry after Kalyan &amp; François (2018)',
+  } = opts;
 
   const captionHeight = subtitle ? 26 : 0;
   const totalHeight = height + captionHeight;
@@ -41,8 +46,8 @@ export function exportSvg(scene: Scene, opts: ExportOptions = {}): string {
   );
   lines.push(`  <title>${esc(title)}</title>`);
   lines.push(
-    `  <desc>${esc(subtitle ? `${subtitle}. ` : '')}Historical Glottometry ` +
-      `after Kalyan &amp; François (2018). Drawn by ${esc(versionStamp())}.</desc>`,
+    `  <desc>${esc(subtitle ? `${subtitle}. ` : '')}${method}. ` +
+      `Drawn by ${esc(versionStamp())}.</desc>`,
   );
   lines.push(
     `  <rect x="${viewBox.x}" y="${viewBox.y}" width="${viewBox.width}" ` +
